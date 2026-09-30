@@ -51,7 +51,12 @@ function love.draw()
 end
 
 function love.keypressed(key)
+  ui.keyEvent(key, true)
   app:keypressed(key)
+end
+
+function love.keyreleased(key)
+  ui.keyEvent(key, false)
 end
 
 function love.textinput(t)
@@ -87,6 +92,8 @@ function love.resize()
 end
 
 function love.focus()
+  -- modifiers released while unfocused never reach us
+  ui.clearMods()
   ui.dirty = true
 end
 
@@ -98,7 +105,7 @@ end
 -- A power-friendly main loop: only redraw when something changed or is animating,
 -- and sleep while idle so the app can sit open all day next to your editor.
 function love.run()
-  love.load(love.arg.parseGameArguments(arg), arg)
+  love.load(love.arg.parseGameArguments(arg), arg) -- luacheck: ignore
   love.timer.step()
   local lastBlink = -1
   local idle = 0
@@ -112,7 +119,7 @@ function love.run()
           return a or 0
         end
       end
-      love.handlers[name](a, b, c, d, e, f)
+      love.handlers[name](a, b, c, d, e, f) -- luacheck: ignore
       hadEvents = true
     end
 

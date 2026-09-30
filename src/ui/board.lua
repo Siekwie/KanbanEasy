@@ -65,7 +65,7 @@ function board.layout(app, x, y, w, h)
       C.x = PAD + (i - 1) * (L.colW + GAP)
       C.headerY = 0
     end
-    local cy = L.list and (listY + HEADER_H) or 0
+    local cy = L.list and (listY + HEADER_H + 8) or 0
     if app.quickAdd and app.quickAdd.col == col.id then
       C.quickY = cy
       cy = cy + app.quickAdd.input:contentHeight(L.colW - 12) + 8 + CARD_GAP
@@ -547,7 +547,7 @@ local function drawColumns(app, L)
       C.screenOffsetY = y + HEADER_H - s.pos
       ui.region("col-" .. C.col.id, x, y + HEADER_H, L.colW, viewH, {
         onWheel = function(dx, dy)
-          if love.keyboard.isDown("lshift", "rshift") or (dx ~= 0 and math.abs(dx) > math.abs(dy)) then
+          if ui.shift() or (dx ~= 0 and math.abs(dx) > math.abs(dy)) then
             hs.target = hs.target - (dx ~= 0 and dx or dy) * 60
           else
             s.target = s.target - dy * 60

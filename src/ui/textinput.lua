@@ -8,17 +8,7 @@ local util = require("src.util")
 local TextInput = {}
 TextInput.__index = TextInput
 
-local function primaryDown()
-  return love.keyboard.isDown("lctrl", "rctrl", "lgui", "rgui")
-end
-
-local function shiftDown()
-  return love.keyboard.isDown("lshift", "rshift")
-end
-
-local function altDown()
-  return love.keyboard.isDown("lalt", "ralt")
-end
+local primaryDown, shiftDown, altDown = ui.primary, ui.shift, ui.alt
 
 --- opts: font, multiline, placeholder, onSubmit(text, input), onCommit(text, input),
 ---       onChange(text), onCancel(), submitOnEnter (multiline: Enter submits, Shift+Enter newline),

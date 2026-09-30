@@ -220,6 +220,55 @@ function ui.startCapture(handlers)
   ui.pressed = nil
 end
 
+-- Modifier keys ----------------------------------------------------------------------
+-- Tracked from the event stream rather than love.keyboard.isDown, which reports the
+-- state *after* a whole batch of queued events and so misses fast Shift/Ctrl combos.
+
+ui.mods = {}
+
+local MOD_KEYS = {
+  lshift = "shift",
+  rshift = "shift",
+  lctrl = "ctrl",
+  rctrl = "ctrl",
+  lgui = "gui",
+  rgui = "gui",
+  lalt = "alt",
+  ralt = "alt",
+}
+
+function ui.keyEvent(key, down)
+  if MOD_KEYS[key] then
+    ui.mods[key] = down or nil
+  end
+end
+
+function ui.clearMods()
+  ui.mods = {}
+end
+
+local function modDown(name)
+  for k, v in pairs(MOD_KEYS) do
+    if v == name and ui.mods[k] then
+      return true
+    end
+  end
+  return false
+end
+
+function ui.shift()
+  return modDown("shift")
+end
+
+function ui.alt()
+  return modDown("alt")
+end
+
+--- Ctrl, or Cmd on macOS.
+function ui.primary()
+  return modDown("ctrl") or modDown("gui")
+end
+
 -- Focus --------------------------------------------------------------------------
 
 function ui.setFocus(input)

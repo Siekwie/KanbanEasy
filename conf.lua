@@ -1,5 +1,5 @@
 function love.conf(t)
-  t.identity = "kanbaneasy"
+  t.identity = "KanbanEasy"
   t.version = "11.5"
   t.console = false
 
