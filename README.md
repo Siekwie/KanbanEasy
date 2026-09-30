@@ -33,7 +33,18 @@ local HTTP API.
   time, right-click → Open (or run `xattr -dr com.apple.quarantine KanbanEasy.app`).
 - **Linux**: `chmod +x KanbanEasy-x86_64.AppImage && ./KanbanEasy-x86_64.AppImage`
 
-**From source**, with [LÖVE 11.5](https://love2d.org) installed:
+**Build it yourself on Windows** (PowerShell; LÖVE is downloaded automatically):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1           # dist\KanbanEasy\KanbanEasy.exe + zip
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 install   # + %LOCALAPPDATA%\Programs, Start Menu shortcut
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 run       # run from source with an installed LÖVE
+```
+
+Other targets: `love` (just the `.love` file) and `clean`. Running `install` again updates in place. If the app is
+open, it gets closed first (the board is already saved).
+
+**On macOS / Linux**, with [LÖVE 11.5](https://love2d.org) installed:
 
 ```sh
 love .                      # from the repo root

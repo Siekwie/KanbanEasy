@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build KanbanEasy packages into dist/.
+# Build KanbanEasy packages into dist/. (On Windows, use scripts/build.ps1.)
 #
 #   scripts/build.sh love     dist/KanbanEasy.love          (run with: love KanbanEasy.love)
 #   scripts/build.sh windows  dist/KanbanEasy-windows.zip   (KanbanEasy.exe + LÖVE runtime)
@@ -42,8 +42,9 @@ build_windows() {
   local out="$work/$APP"
   mkdir -p "$out"
   cat "$src/love.exe" "$DIST/$APP.love" >"$out/$APP.exe"
-  cp "$src"/*.dll "$src/license.txt" "$out/"
-  cp "$ROOT/README.md" "$out/README.md"
+  cp "$src"/*.dll "$out/"
+  cp "$src/license.txt" "$out/LOVE-license.txt"
+  cp "$ROOT/assets/icon.ico" "$ROOT/README.md" "$out/"
   rm -f "$DIST/$APP-windows.zip"
   (cd "$work" && zip -9 -qr "$DIST/$APP-windows.zip" "$APP")
   echo "built dist/$APP-windows.zip"
