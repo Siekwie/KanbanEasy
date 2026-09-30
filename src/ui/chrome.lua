@@ -147,10 +147,10 @@ function chrome.drawSidebar(app, x, y, w, h)
   local fileHot = ui.region("data-file", x + 10, fy, w - 20, 30, {
     cursor = "hand",
     onClick = function()
-      app:copy(app.persist.path, "Copied data file path")
+      app.persist:openFolder()
     end,
-    onRightClick = function()
-      love.system.openURL("file://" .. app.persist.path:gsub("[^/\\]+$", ""))
+    onRightClick = function(mx, my)
+      app:dataMenu(mx, my)
     end,
   })
   if fileHot then
@@ -160,7 +160,7 @@ function chrome.drawSidebar(app, x, y, w, h)
   ui.icon("folder", x + 17, fy + 8, 14, c.textDim)
   local saveErr = app.persist.lastError
   ui.textFit(
-    saveErr and ("Save failed: " .. saveErr) or "board.json",
+    saveErr and ("Save failed: " .. saveErr) or app.persist.displayPath(app.persist.path),
     f.body,
     x + 36,
     fy + (30 - f.body:getHeight()) / 2,

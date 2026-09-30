@@ -122,14 +122,19 @@ locally as you can use it. That's intentional.
 
 ## Data
 
-Everything lives in a single, human-readable JSON file:
+Everything lives in a single, human-readable JSON file in a `KanbanEasy` folder in your user directory:
 
-- Linux: `~/.local/share/KanbanEasy/board.json`
-- macOS: `~/Library/Application Support/KanbanEasy/board.json`
-- Windows: `%APPDATA%\KanbanEasy\board.json`
+- Windows: `C:\Users\<you>\KanbanEasy\board.json`
+- macOS: `/Users/<you>/KanbanEasy/board.json`
+- Linux: `~/KanbanEasy/board.json`
 
-Keys are sorted so the file diffs cleanly in git. A daily snapshot goes to `backups/` next to it (one per weekday,
-so you always have the last week). Click `board.json` in the sidebar to copy its path.
+Keys are sorted so the file diffs cleanly in git. The first launch of each day saves a snapshot to `backups/` next
+to it, one per weekday, so you always have the last week. Click the path at the bottom of the sidebar to open the
+folder; right-click it to copy the path. The file is watched, so if you edit it by hand (or `git pull` it) the app
+reloads it, and Ctrl+Z undoes the reload.
+
+Earlier builds kept the board in the OS app-data folder (`%APPDATA%\KanbanEasy` on Windows). If one is found there,
+it's copied to the new folder on first launch. The old file is left untouched.
 
 | Env var | |
 | --- | --- |
