@@ -1,6 +1,6 @@
 -- Loading and saving the board file.
--- Default location: <appdata>/KanbanEasy/board.json
---   Linux ~/.local/share/KanbanEasy, macOS ~/Library/Application Support/KanbanEasy, Windows %APPDATA%\KanbanEasy
+-- Default location: a KanbanEasy folder in your user directory
+--   Windows C:\Users\<you>\KanbanEasy\board.json, macOS /Users/<you>/KanbanEasy, Linux ~/KanbanEasy
 -- Set KANBANEASY_DATA=/path/to/board.json to keep it somewhere else (a git repo, Dropbox...).
 
 local Store = require("src.store")
@@ -60,25 +60,74 @@ local function ensureDir(dir)
   return false
 end
 
+local function slashes(p)
+  return (p:gsub("\\", "/"):gsub("/+$", ""))
+end
+
+function persist.homeDir()
+  return slashes(love.filesystem.getUserDirectory())
+end
+
+--- Older versions kept the board in the OS app-data folder; copy it over once.
+local function migrateLegacy(dir)
+  local target = dir .. "/board.json"
+  if readFile(target) then
+    return nil
+  end
+  local candidates = {
+    slashes(love.filesystem.getAppdataDirectory()) .. "/KanbanEasy/board.json",
+    slashes(love.filesystem.getSaveDirectory()) .. "/board.json",
+  }
+  for _, legacy in ipairs(candidates) do
+    local contents = readFile(legacy)
+    if contents and contents:match("%S") and writeAtomic(target, contents) then
+      return legacy
+    end
+  end
+  return nil
+end
+
 --- Where the board lives. The same folder is used whether you run `love .` or a
 --- packaged build (LÖVE would otherwise pick different save folders for each).
 function persist.path()
   local env = os.getenv("KANBANEASY_DATA")
   if env and env ~= "" then
-    local dir = env:match("^(.*)[/\\][^/\\]+$")
+    env = slashes(env)
+    local dir = env:match("^(.*)/[^/]+$")
     if dir and dir ~= "" then
       ensureDir(dir)
     end
     return env, nil
   end
-  local base = love.filesystem.getAppdataDirectory():gsub("[/\\]+$", "")
-  local dir = base .. "/KanbanEasy"
-  if not ensureDir(dir) then
-    dir = love.filesystem.getSaveDirectory()
-    love.filesystem.createDirectory("")
+  local dir = persist.homeDir() .. "/KanbanEasy"
+  local migrated
+  if ensureDir(dir) then
+    migrated = migrateLegacy(dir)
+  else
+    -- user folder not writable: fall back to LÖVE's own save folder
+    love.filesystem.write(".keep", "")
+    dir = slashes(love.filesystem.getSaveDirectory())
   end
   ensureDir(dir .. "/backups")
-  return dir .. "/board.json", dir .. "/backups"
+  return dir .. "/board.json", dir .. "/backups", migrated
+end
+
+--- Short, human-friendly version of a path ("~/KanbanEasy/board.json").
+function persist.displayPath(path)
+  local home = persist.homeDir()
+  if home ~= "" and path:sub(1, #home + 1) == home .. "/" then
+    path = "~" .. path:sub(#home + 1)
+  end
+  if isWindows() then
+    path = path:gsub("/", "\\")
+  end
+  return path
+end
+
+--- Open the folder containing the board in Explorer / Finder / the file manager.
+function persist:openFolder()
+  local dir = self.path:match("^(.*)/[^/]+$") or self.path
+  love.system.openURL("file://" .. (dir:sub(1, 1) == "/" and "" or "/") .. dir)
 end
 
 local function seed(store)
@@ -122,7 +171,7 @@ end
 
 --- Load the store from disk (or seed a fresh one). Returns store, path, warning.
 function persist.load()
-  local path, backups = persist.path()
+  local path, backups, migratedFrom = persist.path()
   local warning
   local contents = readFile(path)
   local store
@@ -147,12 +196,15 @@ function persist.load()
   if seeded then
     persist.save(self)
   end
+  if migratedFrom then
+    self.notice = "Moved your board to " .. persist.displayPath(path)
+  end
   store:on(function()
     self.pending = self.pending or SAVE_DELAY
   end)
   -- One snapshot per weekday (first launch of the day), so there's always a week of history.
   local today = os.date("%Y-%m-%d")
-  if backups and contents and not warning and store:setting("lastBackup") ~= today then
+  if backups and contents and not warning and (store:setting("lastBackup") ~= today or migratedFrom) then
     writeAtomic(backups .. "/board-" .. os.date("%a") .. ".json", contents)
     store:setSetting("lastBackup", today)
   end

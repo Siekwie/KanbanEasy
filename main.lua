@@ -27,6 +27,9 @@ function love.load()
   if warning then
     overlay.toast(warning, "error")
   end
+  if p.notice then
+    overlay.toast(p.notice)
+  end
   if server.error and server.error ~= "disabled" then
     overlay.toast("API not started: " .. server.error, "error")
   end

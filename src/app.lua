@@ -742,6 +742,36 @@ function App:projectSwitcher(x, y)
   overlay.openMenu(x, y, items, { minW = 240, keyboard = true })
 end
 
+function App:dataMenu(x, y)
+  local path = self.persist.path
+  local nativePath = love.system.getOS() == "Windows" and path:gsub("/", "\\") or path
+  overlay.openMenu(x, y, {
+    {
+      label = "Open folder",
+      icon = "folder",
+      onSelect = function()
+        self.persist:openFolder()
+      end,
+    },
+    {
+      label = "Copy file path",
+      icon = "copy",
+      onSelect = function()
+        self:copy(nativePath, "Copied " .. nativePath)
+      end,
+    },
+    {
+      label = "Save now",
+      hint = "Ctrl+S",
+      onSelect = function()
+        ui.blur()
+        self.persist:save()
+        overlay.toast("Saved to " .. self.persist.displayPath(path))
+      end,
+    },
+  }, { minW = 220 })
+end
+
 function App:apiMenu(x, y)
   overlay.openMenu(x, y, {
     {
