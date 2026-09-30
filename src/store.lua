@@ -216,6 +216,15 @@ function Store:redo()
   return true
 end
 
+--- Swap in data loaded from disk (external edit). Undoable, keeps local UI settings.
+function Store:replaceData(data)
+  self:_checkpoint()
+  local settings = self.data.settings
+  self.data = Store.normalize(data)
+  self.data.settings = settings
+  self:_emit("reload")
+end
+
 -- Settings -------------------------------------------------------------------
 
 function Store:setting(key, default)
