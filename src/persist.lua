@@ -1,13 +1,13 @@
 -- Loading and saving the board file.
--- Default location is LÖVE's save directory (e.g. ~/.local/share/love/kanbaneasy/board.json);
--- set KANBANEASY_DATA=/path/to/board.json to keep it somewhere else (a git repo, Dropbox...).
+-- Default location: <appdata>/KanbanEasy/board.json
+--   Linux ~/.local/share/KanbanEasy, macOS ~/Library/Application Support/KanbanEasy, Windows %APPDATA%\KanbanEasy
+-- Set KANBANEASY_DATA=/path/to/board.json to keep it somewhere else (a git repo, Dropbox...).
 
 local Store = require("src.store")
 
 local persist = {}
 
 local SAVE_DELAY = 0.4
-local BACKUPS_KEPT = 10
 
 local function readFile(path)
   local f = io.open(path, "rb")
@@ -36,13 +36,48 @@ local function writeAtomic(path, contents)
   return ok, rerr
 end
 
+local function isWindows()
+  return love.system.getOS() == "Windows"
+end
+
+--- Make sure a directory exists and is writable.
+local function ensureDir(dir)
+  local probe = dir .. "/.kanbaneasy-write-test"
+  local f = io.open(probe, "w")
+  if not f then
+    if isWindows() then
+      os.execute('mkdir "' .. dir:gsub("/", "\\") .. '" >NUL 2>NUL')
+    else
+      os.execute("mkdir -p '" .. dir:gsub("'", "'\\''") .. "'")
+    end
+    f = io.open(probe, "w")
+  end
+  if f then
+    f:close()
+    os.remove(probe)
+    return true
+  end
+  return false
+end
+
+--- Where the board lives. The same folder is used whether you run `love .` or a
+--- packaged build (LÖVE would otherwise pick different save folders for each).
 function persist.path()
   local env = os.getenv("KANBANEASY_DATA")
   if env and env ~= "" then
+    local dir = env:match("^(.*)[/\\][^/\\]+$")
+    if dir and dir ~= "" then
+      ensureDir(dir)
+    end
     return env, nil
   end
-  love.filesystem.createDirectory("backups")
-  local dir = love.filesystem.getSaveDirectory()
+  local base = love.filesystem.getAppdataDirectory():gsub("[/\\]+$", "")
+  local dir = base .. "/KanbanEasy"
+  if not ensureDir(dir) then
+    dir = love.filesystem.getSaveDirectory()
+    love.filesystem.createDirectory("")
+  end
+  ensureDir(dir .. "/backups")
   return dir .. "/board.json", dir .. "/backups"
 end
 
@@ -101,30 +136,26 @@ function persist.load()
       warning = "Could not read board file (" .. tostring(err) .. "). A copy was saved to " .. broken
     end
   end
+  local seeded = false
   if not store then
     store = Store.new()
     seed(store)
+    seeded = true
   end
   local self = { store = store, path = path, backups = backups, pending = nil, lastError = nil }
+  if seeded then
+    persist.save(self)
+  end
   store:on(function()
     self.pending = self.pending or SAVE_DELAY
   end)
-  if backups and contents and not warning then
-    local name = backups .. "/board-" .. os.date("%Y-%m-%d") .. ".json"
-    if not readFile(name) then
-      writeAtomic(name, contents)
-      persist.pruneBackups()
-    end
+  -- One snapshot per weekday (first launch of the day), so there's always a week of history.
+  local today = os.date("%Y-%m-%d")
+  if backups and contents and not warning and store:setting("lastBackup") ~= today then
+    writeAtomic(backups .. "/board-" .. os.date("%a") .. ".json", contents)
+    store:setSetting("lastBackup", today)
   end
   return setmetatable(self, { __index = persist }), warning
-end
-
-function persist.pruneBackups()
-  local files = love.filesystem.getDirectoryItems("backups")
-  table.sort(files)
-  for i = 1, #files - BACKUPS_KEPT do
-    love.filesystem.remove("backups/" .. files[i])
-  end
 end
 
 function persist:update(dt)

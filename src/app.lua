@@ -42,6 +42,9 @@ function App.new(persist, server)
 
   self.store:on(function(kind, info)
     ui.dirty = true
+    if kind == "undo" or kind == "redo" or kind == "project" then
+      self:ensureProject()
+    end
     if kind == "issue" and info.id and info.actor ~= "you" and not info.deleted then
       self.flash[info.id] = ui.time
     end
@@ -254,7 +257,7 @@ function App:startQuickAdd(colId)
       input:setText("")
       input.history, input.future = {}, {}
       self.selected = issue.id
-      if love.keyboard.isDown("lshift", "rshift") then
+      if ui.shift() then
         self.quickAdd = nil
         self:openIssueDetail(issue.id)
       end
@@ -758,13 +761,33 @@ function App:apiMenu(x, y)
   }, { minW = 240 })
 end
 
+function App:showShortcuts()
+  overlay.openModal({
+    title = "Keyboard shortcuts",
+    message = table.concat({
+      "N  new issue  ·  E  edit title  ·  Enter  open",
+      "↑↓←→ / hjkl  select  ·  Shift+arrows  move card",
+      "0–4  priority  ·  Del  delete  ·  Ctrl+D  duplicate",
+      "Ctrl+C  copy Markdown  ·  Ctrl+Shift+C  copy ID",
+      "Ctrl+Shift+P  copy agent prompt",
+      "/  Ctrl+F  search  (@who  #label  p:high  is:todo)",
+      "Ctrl+Z  undo  ·  Ctrl+Shift+Z  redo",
+      "Ctrl+P  switch project  ·  Ctrl+1–9  jump to project",
+      "Ctrl+B  sidebar  ·  Esc  close / clear",
+      "",
+      "Quick add understands  #label  @assignee  !high  (or !!!)",
+    }, "\n"),
+    confirm = "Got it",
+    noCancel = true,
+  })
+end
+
 -- Frame -------------------------------------------------------------------------------------
 
 function App:update(dt)
   self.frame = self.frame + 1
-  if not self.store:project(self.project.key) then
-    self:ensureProject()
-  end
+  -- Re-resolve every frame: undo/redo swap in restored project tables.
+  self:ensureProject()
   if self.quickAdd and not self.quickAdd.input:isFocused() and self.quickAdd.input.text == "" then
     self.quickAdd = nil
     ui.dirty = true
@@ -819,13 +842,7 @@ end
 
 -- Keyboard ------------------------------------------------------------------------------------
 
-local function ctrlDown()
-  return love.keyboard.isDown("lctrl", "rctrl", "lgui", "rgui")
-end
-
-local function shiftDown()
-  return love.keyboard.isDown("lshift", "rshift")
-end
+local ctrlDown, shiftDown = ui.primary, ui.shift
 
 function App:keypressed(key)
   ui.dirty = true
@@ -857,14 +874,10 @@ function App:keypressed(key)
   local sel = self.selected and self.store:issue(self.selected)
 
   if ctrl then
-    if key == "z" then
-      if shift then
-        self.store:redo()
-      else
-        self.store:undo()
-      end
-    elseif key == "y" then
-      self.store:redo()
+    if key == "z" and not shift then
+      overlay.toast(self.store:undo() and "Undone" or "Nothing to undo")
+    elseif key == "y" or key == "z" then
+      overlay.toast(self.store:redo() and "Redone" or "Nothing to redo")
     elseif key == "f" or key == "k" then
       self.search:focus()
       self.search:selectAll()
@@ -913,6 +926,9 @@ function App:keypressed(key)
     elseif self.drawerOpen then
       self.drawerOpen = false
     end
+  elseif key == "/" and shift or key == "?" then
+    self:showShortcuts()
+    self.swallowText = true
   elseif key == "/" then
     self.search:focus()
     self.search:selectAll()
@@ -941,7 +957,7 @@ function App:keypressed(key)
       l = { 1, 0 },
     }
     local dx, dy = map[key][1], map[key][2]
-    if (shift or love.keyboard.isDown("lalt", "ralt")) and sel then
+    if (shift or ui.alt()) and sel then
       self:moveSelected(dx, dy)
     else
       self:navigate(dx, dy)

@@ -281,10 +281,12 @@ local function drawModal()
     style = m.opts.danger and "danger" or "primary",
     onClick = overlay.confirmModal,
   })
-  ui.button("modal-cancel", "Cancel", x + w - 20 - bw - 8 - 84, y + h - 50, 84, 32, {
-    style = "ghost",
-    onClick = overlay.closeModal,
-  })
+  if not m.opts.noCancel then
+    ui.button("modal-cancel", "Cancel", x + w - 20 - bw - 8 - 84, y + h - 50, 84, 32, {
+      style = "ghost",
+      onClick = overlay.closeModal,
+    })
+  end
 end
 
 local function modalKey(key)
