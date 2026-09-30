@@ -21,6 +21,21 @@ jobs:
       - run: busted
       - run: luacheck .
 
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and install with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\KanbanEasy\KanbanEasy.exe'
+          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'KanbanEasy.lnk'
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          if (-not (Test-Path $lnk)) { throw "missing $lnk" }
+          if (-not (Test-Path dist\KanbanEasy-windows.zip)) { throw 'missing zip' }
+
   package:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
