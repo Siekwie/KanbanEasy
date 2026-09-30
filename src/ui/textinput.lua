@@ -406,6 +406,13 @@ end
 
 function TextInput:keypressed(key)
   local ctrl, shift, alt = primaryDown(), shiftDown(), altDown()
+  -- macOS: Cmd+arrows jump to line / document edges
+  if ui.mods.lgui or ui.mods.rgui then
+    local mac = { left = { "home", false }, right = { "end", false }, up = { "home", true }, down = { "end", true } }
+    if mac[key] then
+      key, ctrl = mac[key][1], mac[key][2]
+    end
+  end
   local wordMod = ctrl or alt
   local s = self.text
   local lines = self.lines or self:layout(1e9)

@@ -115,3 +115,28 @@ describe("api", function()
     assert.equal("OT-1", issue.id)
   end)
 end)
+
+describe("server request parsing", function()
+  -- server.lua needs LuaSocket; stub it so the parser can be tested standalone.
+  package.preload["socket"] = package.preload["socket"] or function()
+    return {}
+  end
+  local Server = require("src.server")
+
+  it("waits for the full body and flags Expect: 100-continue", function()
+    local head = "POST /issues HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\nExpect: 100-continue\r\n\r\n"
+    local req, wantsContinue = Server.parseRequest(head)
+    assert.is_nil(req)
+    assert.is_true(wantsContinue)
+    req = Server.parseRequest(head .. "0123456789")
+    assert.equal("POST", req.method)
+    assert.equal("/issues", req.target)
+    assert.equal("0123456789", req.rawBody)
+    assert.equal("localhost", req.headers.host)
+  end)
+
+  it("rejects garbage and oversized bodies", function()
+    assert.is_true(Server.parseRequest("hello\r\n\r\n").bad)
+    assert.is_true(Server.parseRequest("POST / HTTP/1.1\r\nContent-Length: 99999999\r\n\r\n").tooLarge)
+  end)
+end)

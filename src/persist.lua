@@ -142,7 +142,8 @@ function persist.load()
     seed(store)
     seeded = true
   end
-  local self = { store = store, path = path, backups = backups, pending = nil, lastError = nil }
+  local self =
+    { store = store, path = path, backups = backups, pending = nil, lastError = nil, lastContents = contents }
   if seeded then
     persist.save(self)
   end
@@ -158,19 +159,47 @@ function persist.load()
   return setmetatable(self, { __index = persist }), warning
 end
 
+local WATCH_INTERVAL = 1.5
+
 function persist:update(dt)
   if self.pending then
     self.pending = self.pending - dt
     if self.pending <= 0 then
       self:save()
     end
+    return
   end
+  -- Pick up edits made by something else (git pull, a script, another instance).
+  self.watchTimer = (self.watchTimer or 0) + dt
+  if self.watchTimer >= WATCH_INTERVAL then
+    self.watchTimer = 0
+    return self:checkExternal()
+  end
+end
+
+--- Reload if the file on disk no longer matches what we last read or wrote.
+function persist:checkExternal()
+  local contents = readFile(self.path)
+  if not contents or contents == self.lastContents or not contents:match("%S") then
+    return false
+  end
+  local fresh = Store.fromJSON(contents)
+  if not fresh then
+    return false -- half-written or broken; try again later
+  end
+  self.lastContents = contents
+  self.store:replaceData(fresh.data)
+  return true
 end
 
 function persist:save()
   self.pending = nil
-  local ok, err = writeAtomic(self.path, self.store:toJSON())
+  local contents = self.store:toJSON()
+  local ok, err = writeAtomic(self.path, contents)
   self.lastError = not ok and err or nil
+  if ok then
+    self.lastContents = contents
+  end
   return ok, err
 end
 

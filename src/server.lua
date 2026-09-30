@@ -112,7 +112,9 @@ local function parseRequest(buf)
   end
   local bodyStart = headerEnd + sepLen
   if #buf - bodyStart + 1 < len then
-    return nil
+    -- curl waits a second for "100 Continue" before sending bodies over 1 KB
+    local expect = (headers["expect"] or ""):lower()
+    return nil, expect == "100-continue"
   end
   return {
     method = method,
@@ -151,7 +153,11 @@ function Server:update()
         c.buf = c.buf .. chunk
         active = true
       end
-      local req = parseRequest(c.buf)
+      local req, wantsContinue = parseRequest(c.buf)
+      if wantsContinue and not c.continued then
+        c.continued = true
+        c.sock:send("HTTP/1.1 100 Continue\r\n\r\n")
+      end
       if req then
         local res
         if req.bad then

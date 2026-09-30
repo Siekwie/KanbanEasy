@@ -39,7 +39,9 @@ function love.update(dt)
   if app.server:update() then
     busy = true
   end
-  app.persist:update(dt)
+  if app.persist:update(dt) then
+    busy = true
+  end
   if app:update(dt) then
     busy = true
   end

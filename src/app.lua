@@ -42,7 +42,7 @@ function App.new(persist, server)
 
   self.store:on(function(kind, info)
     ui.dirty = true
-    if kind == "undo" or kind == "redo" or kind == "project" then
+    if kind == "undo" or kind == "redo" or kind == "project" or kind == "reload" then
       self:ensureProject()
     end
     if kind == "issue" and info.id and info.actor ~= "you" and not info.deleted then
@@ -51,8 +51,15 @@ function App.new(persist, server)
     if info.deleted and info.id == self.openIssue then
       detail.close(self)
     end
-    if (kind == "undo" or kind == "redo") and self.openIssue and not self.store:issue(self.openIssue) then
+    if
+      (kind == "undo" or kind == "redo" or kind == "reload")
+      and self.openIssue
+      and not self.store:issue(self.openIssue)
+    then
       detail.close(self)
+    end
+    if kind == "reload" then
+      overlay.toast("Board file changed on disk; reloaded")
     end
   end)
   self:ensureProject()
