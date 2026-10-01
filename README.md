@@ -33,7 +33,9 @@ local HTTP API.
   time, right-click → Open (or run `xattr -dr com.apple.quarantine KanbanEasy.app`).
 - **Linux**: `chmod +x KanbanEasy-x86_64.AppImage && ./KanbanEasy-x86_64.AppImage`
 
-**Build it yourself on Windows** (PowerShell; LÖVE is downloaded automatically):
+**Build the exe yourself on Windows**: double-click `build.bat` in the repo root. It downloads LÖVE, builds
+`dist\KanbanEasy\KanbanEasy.exe` (keep the DLLs next to it) plus `dist\KanbanEasy-windows.zip`, and opens the folder.
+Or from PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build.ps1           # dist\KanbanEasy\KanbanEasy.exe + zip
