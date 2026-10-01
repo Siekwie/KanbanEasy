@@ -295,6 +295,15 @@ function detail.draw(app, x, y, w, h)
     end
   )
   cy = cy + rowH + 2
+  if col and col.instructions then
+    local _, lines = f.smallRegular:getWrap(col.instructions, vw - 22)
+    local lh = math.floor(f.smallRegular:getHeight() * 1.4)
+    ui.icon("agent", vx, cy + 1, 12, c.textFaint)
+    for li, line in ipairs(lines) do
+      ui.text(line, f.smallRegular, vx + 18, cy + (li - 1) * lh, c.textFaint)
+    end
+    cy = cy + #lines * lh + 8
+  end
 
   propLabel("Priority", x + PAD, cy, rowH)
   pill(
@@ -326,9 +335,32 @@ function detail.draw(app, x, y, w, h)
   else
     d.assignee.padX = 8
   end
-  d.assignee:draw(vx - 8, cy, math.min(vw + 8, 300), rowH, { bg = false, border = false })
+  local people = project.people
+  local meW = f.small:getWidth("Me") + 16
+  local agentBtnW = f.small:getWidth("Agent") + 16
+  local quickW = meW + agentBtnW + 12
+  local fieldW = math.min(vw + 8, 300)
+  if vw + 8 - fieldW < quickW then
+    fieldW = math.max(120, vw + 8 - quickW)
+  end
+  d.assignee:draw(vx - 8, cy, fieldW, rowH, { bg = false, border = false })
   if issue.assignee ~= "" and not d.assignee:isFocused() then
     ui.avatar(issue.assignee, vx, cy + rowH / 2 - 9, 9)
+  end
+  if vw + 8 - fieldW >= quickW then
+    local qx = vx - 8 + fieldW + 6
+    for _, q in ipairs({ { "Me", "me", meW }, { "Agent", "agent", agentBtnW } }) do
+      local who = people[q[2]]
+      ui.button("detail-assign-" .. q[2], q[1], qx, cy + 5, q[3], rowH - 10, {
+        style = issue.assignee == who and "primary" or "subtle",
+        font = f.small,
+        onClick = function()
+          ui.blur()
+          app:toggleAssign(issue, q[2])
+        end,
+      })
+      qx = qx + q[3] + 6
+    end
   end
   cy = cy + rowH + 2
 

@@ -19,8 +19,11 @@ currently open in the app is used otherwise.
   GET    /projects                 list projects (+ column counts)
   POST   /projects                 {name, key?}
   GET    /projects/KEY             project with columns and issues   (?format=md)
-  PATCH  /projects/KEY             {name}
+  PATCH  /projects/KEY             {name?, me?, agent?, default_assignee?}
   POST   /projects/KEY/columns     {name}
+  PATCH  /projects/KEY/columns/ID  {name?, auto_assign?, instructions?}
+                                   auto_assign: who gets cards that land in the column
+                                   ("@agent", "@me", a name, "-" to unassign, "" for no rule)
   GET    /issues                   ?project=&status=&assignee=&label=&q=&limit=   (?format=md)
   POST   /issues                   {project?, title, description?, status?, priority?, labels?, assignee?, top?}
   GET    /issues/ID                one issue with activity           (?format=md)
@@ -33,6 +36,8 @@ currently open in the app is used otherwise.
                                    assigns it and moves it to `to`. 404 when nothing to claim.
 
 Status accepts column ids or names ("in_progress", "In Progress", "doing").
+Assignee accepts a name or the roles "me" / "agent" (set per project; see GET /projects/KEY).
+An issue's "instructions" are its column's: what to do with cards in that status.
 Priority: none | low | medium | high | urgent (or 0-4). Labels: array or "a, b".
 Search (q): words, @assignee, #label, p:high, is:todo.
 ]]
@@ -83,6 +88,7 @@ end
 local function issueJSON(store, issue, project, withActivity)
   local col = store:column(project, issue.status)
   local out = {
+    instructions = col and col.instructions,
     id = issue.id,
     project = project.key,
     title = issue.title,
@@ -107,12 +113,29 @@ local function issueJSON(store, issue, project, withActivity)
   return out
 end
 
+local function columnJSON(store, p, c)
+  return {
+    id = c.id,
+    name = c.name,
+    count = #store:issuesIn(p, c.id),
+    auto_assign = store:ruleAssignee(p, c),
+    instructions = c.instructions,
+  }
+end
+
 local function projectSummary(store, p)
   local cols = {}
   for i, c in ipairs(p.columns) do
-    cols[i] = { id = c.id, name = c.name, count = #store:issuesIn(p, c.id) }
+    cols[i] = columnJSON(store, p, c)
   end
-  return { key = p.key, name = p.name, columns = cols, issue_count = #p.issues }
+  return {
+    key = p.key,
+    name = p.name,
+    columns = cols,
+    issue_count = #p.issues,
+    people = { me = p.people.me, agent = p.people.agent },
+    default_assignee = store:resolveAssignee(p, p.defaultAssignee),
+  }
 end
 
 --- Pick the project for a request: explicit, the only one, or the active one in the UI.
@@ -198,7 +221,13 @@ route("GET", { "projects", ":key" }, function(store, req, key)
 end)
 
 route("PATCH", { "projects", ":key" }, function(store, req, key)
-  local p, e = store:updateProject(key, { name = req.body.name })
+  local b = req.body
+  local p, e = store:updateProject(key, {
+    name = b.name,
+    me = b.me,
+    agent = b.agent,
+    defaultAssignee = b.default_assignee or b.defaultAssignee,
+  })
   if not p then
     return err(p == nil and e:find("^no project") and 404 or 400, e)
   end
@@ -214,6 +243,43 @@ route("POST", { "projects", ":key", "columns" }, function(store, req, key)
     return err(400, e)
   end
   return response(201, c)
+end)
+
+route("PATCH", { "projects", ":key", "columns", ":id" }, function(store, req, key, id)
+  local p = store:project(key)
+  if not p then
+    return err(404, "no project '" .. key .. "'")
+  end
+  local colId = store:resolveStatus(p, id)
+  if not colId then
+    return err(404, "no column '" .. id .. "'")
+  end
+  local b = req.body
+  local result
+  local ok, e = pcall(function()
+    store:batch(function()
+      if b.name ~= nil then
+        local c, e1 = store:renameColumn(key, colId, b.name)
+        if not c then
+          error(e1, 0)
+        end
+      end
+      local c, n = store:setColumnRules(key, colId, {
+        assign = b.auto_assign or b.assign,
+        instructions = b.instructions,
+      })
+      result = columnJSON(store, p, c)
+      result.reassigned = n
+    end)
+  end)
+  if not ok then
+    return err(400, e)
+  end
+  return response(200, result)
+end)
+
+route("POST", { "projects", ":key", "columns", ":id" }, function(store, req, key, id)
+  return routes.patchColumn(store, req, key, id)
 end)
 
 route("GET", { "issues" }, function(store, req)
@@ -233,15 +299,15 @@ route("GET", { "issues" }, function(store, req)
     search[#search + 1] = q.q
   end
   if q.assignee then
-    search[#search + 1] = "@" .. q.assignee
+    search[#search + 1] = "@" .. q.assignee:gsub("^@", "")
   end
   if q.label then
     search[#search + 1] = "#" .. q.label
   end
-  local match = Store.matcher(table.concat(search, " "))
   local limit = tonumber(q.limit) or math.huge
   local out, lines = {}, {}
   for _, p in ipairs(projects) do
+    local match = Store.matcher(table.concat(search, " "), p.people)
     local status = q.status and store:resolveStatus(p, q.status)
     if not q.status or status then
       for _, c in ipairs(p.columns) do
@@ -249,7 +315,13 @@ route("GET", { "issues" }, function(store, req)
           for _, issue in ipairs(store:issuesIn(p, c.id, match)) do
             if #out < limit then
               out[#out + 1] = issueJSON(store, issue, p, false)
-              lines[#lines + 1] = "- " .. issue.id .. " [" .. c.name .. "] " .. issue.title
+              lines[#lines + 1] = "- "
+                .. issue.id
+                .. " ["
+                .. c.name
+                .. "] "
+                .. issue.title
+                .. (issue.assignee ~= "" and (" @" .. issue.assignee) or "")
             end
           end
         end
@@ -290,7 +362,7 @@ route("GET", { "issues", ":id" }, function(store, req, id)
     return err(404, "no issue '" .. id .. "'")
   end
   if wantsMarkdown(req) then
-    return markdown(store:issueMarkdown(issue, true))
+    return markdown(store:issueMarkdown(issue, true, true))
   end
   return response(200, issueJSON(store, issue, p, true))
 end)
@@ -349,7 +421,7 @@ route("POST", { "claim" }, function(store, req)
   if not p then
     return err(400, e)
   end
-  local assignee = util.trim(tostring(b.assignee or req.actor or ""))
+  local assignee = store:resolveAssignee(p, b.assignee or req.actor or "")
   if assignee == "" then
     return err(400, "assignee is required")
   end
@@ -362,10 +434,8 @@ route("POST", { "claim" }, function(store, req)
   for _, issue in ipairs(store:issuesIn(p, from)) do
     if issue.assignee == "" or issue.assignee:lower() == assignee:lower() then
       store:as(actor, function()
-        store:batch(function()
-          store:updateIssue(issue.id, { assignee = assignee })
-          store:moveIssue(issue.id, to)
-        end)
+        -- one update so the claimer wins over any auto-assign rule on `to`
+        store:updateIssue(issue.id, { assignee = assignee, status = to })
       end)
       return response(200, issueJSON(store, issue, p, true))
     end
@@ -373,10 +443,12 @@ route("POST", { "claim" }, function(store, req)
   return err(404, "nothing to claim in " .. from)
 end)
 
--- Find the PATCH handler for the POST alias above.
+-- Find the PATCH handlers for the POST aliases above.
 for _, r in ipairs(routes) do
   if r.method == "PATCH" and r.pattern[1] == "issues" then
     routes.patchIssue = r.fn
+  elseif r.method == "PATCH" and r.pattern[3] == "columns" then
+    routes.patchColumn = r.fn
   end
 end
 

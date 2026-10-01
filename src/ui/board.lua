@@ -416,7 +416,34 @@ local function drawColumnHeader(app, C, x, y, w)
   local nameX = cx + 18
   local maxNameW = w - (nameX - x) - 80
   local nw = ui.textFit(name, f.heading, nameX, y + (HEADER_H - f.heading:getHeight()) / 2, maxNameW, c.text)
-  ui.text(tostring(#C.issues), f.body, nameX + nw + 8, y + (HEADER_H - f.body:getHeight()) / 2, c.textFaint)
+  local count = tostring(#C.issues)
+  ui.text(count, f.body, nameX + nw + 8, y + (HEADER_H - f.body:getHeight()) / 2, c.textFaint)
+
+  -- auto-assign rule: an arrow and the avatar of whoever cards go to
+  local ruleWho = app.store:ruleAssignee(app.project, col)
+  if ruleWho or col.instructions then
+    local rx = nameX + nw + 8 + f.body:getWidth(count) + 10
+    local rw = (ruleWho and 38 or 0) + (col.instructions and 18 or 0)
+    ui.region("colrule-" .. col.id, rx - 4, y + 8, rw + 4, 24, {
+      cursor = "hand",
+      onClick = function()
+        app:columnMenu(col, ui.mx, ui.my + 8)
+      end,
+    })
+    if ruleWho then
+      ui.text("→", f.small, rx, y + (HEADER_H - f.small:getHeight()) / 2, c.textFaint)
+      if ruleWho == "" then
+        ui.color(c.textFaint)
+        love.graphics.circle("line", rx + 23, y + HEADER_H / 2, 8, 20)
+      else
+        ui.avatar(ruleWho, rx + 14, y + HEADER_H / 2 - 9, 9)
+      end
+      rx = rx + 38
+    end
+    if col.instructions then
+      ui.icon("agent", rx, y + (HEADER_H - 14) / 2, 14, c.textFaint)
+    end
+  end
 
   local showButtons = hot or ui.isHot("coladd-" .. col.id) or ui.isHot("colmenu-" .. col.id)
   if showButtons or app.layout.list then

@@ -100,10 +100,33 @@ function chrome.drawSidebar(app, x, y, w, h)
   end
 
   -- footer ----------------------------------------------------------------------
-  local fy = y + h - 132
+  local fy = y + h - 166
   ui.color(c.border)
   love.graphics.rectangle("fill", x + 16, fy, w - 32, 1)
   fy = fy + 12
+
+  local people = app.project.people
+  local peopleHot = ui.region("people", x + 10, fy, w - 20, 30, {
+    cursor = "hand",
+    onClick = function()
+      app:peopleDialog()
+    end,
+  })
+  if peopleHot then
+    ui.color(c.text, 0.05)
+    ui.rect("fill", x + 10, fy, w - 20, 30, 7)
+  end
+  ui.avatar(people.me, x + 16, fy + 6, 9)
+  ui.avatar(people.agent, x + 28, fy + 6, 9)
+  ui.textFit(
+    people.me .. "  ·  " .. people.agent,
+    f.body,
+    x + 54,
+    fy + (30 - f.body:getHeight()) / 2,
+    w - 74,
+    c.textDim
+  )
+  fy = fy + 34
 
   local server = app.server
   local running = server and server:running()

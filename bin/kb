@@ -9,6 +9,11 @@
 #   kb set KE-12 k=v [k=v ...] update fields (title, description, status, priority, labels, assignee)
 #   kb note KE-12 "text"       add a comment
 #   kb claim [name]            take the next todo, assign it and move it to in_progress
+#   kb mine [name]             open issues assigned to you (or name; "agent" and "me" work)
+#   kb people [me=x agent=y default=me]   show or set who "me" and "agent" are
+#   kb rule COLUMN [assign=agent] [instructions="..."]
+#                              cards landing in COLUMN get that assignee (me, agent, a name,
+#                              - to unassign, empty to remove); instructions go to the agent
 #   kb rm KE-12                delete
 #   kb api                     API reference
 #
@@ -53,18 +58,24 @@ with_fields() {
 
 project_q() { [[ -n "$PROJECT" ]] && printf 'project=%s&' "$PROJECT" || true; }
 
+# the project to act on: KB_PROJECT, or the first one
+project_key() {
+  if [[ -n "$PROJECT" ]]; then
+    echo "$PROJECT"
+    return
+  fi
+  local key
+  key="$(curl -sS "$URL/projects" | sed -n 's/.*"key": "\([^"]*\)".*/\1/p' | head -1)" ||
+    die "can't reach $URL (is KanbanEasy running?)"
+  [[ -n "$key" ]] || die "no projects"
+  echo "$key"
+}
+
 cmd="${1:-board}"
 shift || true
 case "$cmd" in
   board)
-    if [[ -n "$PROJECT" ]]; then
-      req GET "/projects/$PROJECT?format=md"
-    else
-      key="$(curl -sS "$URL/projects" | sed -n 's/.*"key": "\([^"]*\)".*/\1/p' | head -1)" ||
-        die "can't reach $URL (is KanbanEasy running?)"
-      [[ -n "$key" ]] || die "no projects"
-      req GET "/projects/$key?format=md"
-    fi
+    req GET "/projects/$(project_key)?format=md"
     ;;
   ls | list)
     q="$(project_q)"
@@ -105,6 +116,34 @@ case "$cmd" in
     [[ -n "$PROJECT" ]] && extra+=("project=$PROJECT")
     with_fields POST /claim "assignee=$who" "${extra[@]+"${extra[@]}"}"
     ;;
+  mine | inbox)
+    who="${1:-$ACTOR}"
+    open=()
+    while IFS= read -r line; do
+      [[ "$line" == *"[Done]"* ]] || open+=("$line")
+    done < <(req GET "/issues?$(project_q)assignee=$who&format=md")
+    if [[ ${#open[@]} -gt 0 ]]; then printf '%s\n' "${open[@]}"; else echo "_nothing assigned to ${who}_"; fi
+    ;;
+  people)
+    key="$(project_key)"
+    if [[ $# -eq 0 ]]; then
+      req GET "/projects/$key" | sed -n '/"default_assignee"/p; /"people"/,/}/p'
+    else
+      args=()
+      for a in "$@"; do [[ "$a" == default=* ]] && args+=("default_assignee=${a#default=}") || args+=("$a"); done
+      with_fields PATCH "/projects/$key" "${args[@]}" >/dev/null && echo "updated $key"
+    fi
+    ;;
+  rule)
+    [[ $# -ge 1 ]] || die "usage: kb rule COLUMN [assign=who] [instructions=\"...\"]"
+    col="$1"; shift
+    if [[ $# -eq 0 ]]; then
+      # show the column (the PATCH route echoes it back, and an empty PATCH changes nothing)
+      req PATCH "/projects/$(project_key)/columns/$col"
+    else
+      with_fields PATCH "/projects/$(project_key)/columns/$col" "$@"
+    fi
+    ;;
   rm | delete)
     [[ $# -ge 1 ]] || die "usage: kb rm ID"
     req DELETE "/issues/$1"
@@ -113,7 +152,7 @@ case "$cmd" in
     req GET /
     ;;
   -h | --help | help)
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
     ;;
   *)
     die "unknown command '$cmd' (try kb help)"
