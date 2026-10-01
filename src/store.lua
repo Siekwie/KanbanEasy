@@ -53,6 +53,9 @@ local STATUS_ALIASES = {
   icebox = "backlog",
 }
 
+--- Every project knows who "me" and "agent" are, so assignees and rules can refer to the roles.
+Store.DEFAULT_PEOPLE = { me = "me", agent = "agent" }
+
 local UNDO_LIMIT = 60
 local RANK_STEP = 1024
 
@@ -88,6 +91,17 @@ function Store.normalize(data)
       p.columns = util.deepcopy(Store.DEFAULT_COLUMNS)
     end
     p.issues = p.issues or {}
+    p.people = p.people or {}
+    for role, default in pairs(Store.DEFAULT_PEOPLE) do
+      if type(p.people[role]) ~= "string" or util.trim(p.people[role]) == "" then
+        p.people[role] = default
+      end
+    end
+    p.defaultAssignee = type(p.defaultAssignee) == "string" and p.defaultAssignee or ""
+    for _, c in ipairs(p.columns) do
+      c.assign = type(c.assign) == "string" and c.assign ~= "" and c.assign or nil
+      c.instructions = type(c.instructions) == "string" and c.instructions ~= "" and c.instructions or nil
+    end
     local maxNum = 0
     for i, issue in ipairs(p.issues) do
       issue.num = issue.num or tonumber((issue.id or ""):match("%-(%d+)$")) or i
@@ -305,6 +319,8 @@ function Store:createProject(fields)
   if self:project(key) then
     return nil, "project key '" .. key .. "' already exists"
   end
+  -- New projects start with the people and default assignee of the current one.
+  local from = self:project(self:setting("activeProject")) or self.data.projects[1]
   self:_checkpoint()
   local p = {
     key = key,
@@ -312,6 +328,8 @@ function Store:createProject(fields)
     nextNum = 1,
     columns = util.deepcopy(Store.DEFAULT_COLUMNS),
     issues = {},
+    people = util.deepcopy(from and from.people or Store.DEFAULT_PEOPLE),
+    defaultAssignee = from and from.defaultAssignee or "",
     created = self.clock(),
   }
   table.insert(self.data.projects, p)
@@ -319,23 +337,145 @@ function Store:createProject(fields)
   return p
 end
 
+--- fields: name, me, agent (names for the two roles), defaultAssignee ("@me", "@agent", a name or "").
+--- Renaming a role also reassigns the issues that were assigned to the old name.
 function Store:updateProject(key, fields)
   local p = self:project(key)
   if not p then
     return nil, "no project '" .. tostring(key) .. "'"
   end
+  local name = p.name
   if fields.name ~= nil then
-    local name = util.trim(tostring(fields.name))
+    name = util.trim(tostring(fields.name))
     if name == "" then
       return nil, "project name cannot be empty"
     end
-    if name ~= p.name then
-      self:_checkpoint()
-      p.name = name
-      self:_emit("project", { key = p.key })
+  end
+  local people = { me = p.people.me, agent = p.people.agent }
+  for role, default in pairs(Store.DEFAULT_PEOPLE) do
+    if fields[role] ~= nil then
+      local who = util.trim(tostring(fields[role])):gsub("^@", "")
+      if who:lower() == "me" or who:lower() == "agent" then
+        who = who:lower()
+      end
+      people[role] = who ~= "" and who or default
     end
   end
+  if people.me:lower() == people.agent:lower() then
+    return nil, "me and agent need different names"
+  end
+  local defaultAssignee = p.defaultAssignee
+  if fields.defaultAssignee ~= nil then
+    defaultAssignee = Store.personSpec(fields.defaultAssignee)
+  end
+  if
+    name == p.name
+    and people.me == p.people.me
+    and people.agent == p.people.agent
+    and defaultAssignee == p.defaultAssignee
+  then
+    return p
+  end
+  self:_checkpoint()
+  for role in pairs(Store.DEFAULT_PEOPLE) do
+    local old = p.people[role]
+    if people[role] ~= old then
+      for _, issue in ipairs(p.issues) do
+        if issue.assignee == old then
+          issue.assignee = people[role]
+        end
+      end
+    end
+  end
+  p.name = name
+  p.people = people
+  p.defaultAssignee = defaultAssignee
+  self:_emit("project", { key = p.key })
   return p
+end
+
+-- People & rules -------------------------------------------------------------
+
+--- Normalize a person reference for storage: "@agent"/"agent" -> "@agent", "@me"/"me" -> "@me",
+--- "-"/"none" -> "-" (unassign), "@bob" -> "bob", "" -> "".
+function Store.personSpec(v)
+  local s = util.trim(tostring(v or ""))
+  local lower = s:lower():gsub("^@", "")
+  if lower == "me" or lower == "agent" then
+    return "@" .. lower
+  end
+  if lower == "-" or lower == "none" or lower == "nobody" or lower == "unassign" or lower == "unassigned" then
+    return "-"
+  end
+  return (s:gsub("^@", ""))
+end
+
+--- Turn an assignee as typed ("me", "@agent", "@bob", "bob") into a name.
+function Store:resolveAssignee(project, v)
+  local spec = Store.personSpec(v)
+  if spec == "@me" then
+    return project.people.me
+  elseif spec == "@agent" then
+    return project.people.agent
+  elseif spec == "-" then
+    return ""
+  end
+  return spec
+end
+
+--- The assignee a column's rule hands out, or nil when it has no rule ("" means unassign).
+function Store:ruleAssignee(project, col)
+  if not col or not col.assign then
+    return nil
+  end
+  return self:resolveAssignee(project, col.assign)
+end
+
+function Store:_applyColumnRule(project, issue)
+  local col = self:column(project, issue.status)
+  local who = self:ruleAssignee(project, col)
+  if who and who ~= issue.assignee then
+    issue.assignee = who
+    self:_log(issue, "event", (who == "" and "unassigned" or ("assigned to " .. who)) .. " (" .. col.name .. " rule)")
+    return true
+  end
+  return false
+end
+
+--- Set a column's rules. fields: assign ("@agent", "@me", a name, "-" to unassign, "" for no rule),
+--- instructions (free text for whoever picks up cards there).
+--- A new assign rule also applies to the cards already in the column. Returns col, number reassigned.
+function Store:setColumnRules(key, id, fields)
+  local p = self:project(key)
+  local c = p and self:column(p, id)
+  if not c then
+    return nil, "no such column"
+  end
+  local assign, instructions = c.assign, c.instructions
+  if fields.assign ~= nil then
+    assign = Store.personSpec(fields.assign)
+    assign = assign ~= "" and assign or nil
+  end
+  if fields.instructions ~= nil then
+    instructions = util.trim(tostring(fields.instructions))
+    instructions = instructions ~= "" and instructions or nil
+  end
+  if assign == c.assign and instructions == c.instructions then
+    return c, 0
+  end
+  self:_checkpoint()
+  c.assign, c.instructions = assign, instructions
+  local n = 0
+  if fields.assign ~= nil then
+    for _, issue in ipairs(self:issuesIn(p, c.id)) do
+      if self:_applyColumnRule(p, issue) then
+        issue.updated = self.clock()
+        n = n + 1
+      end
+    end
+  end
+  self:_emit("columns", { key = p.key })
+  return c, n
 end
 
 function Store:deleteProject(key)
@@ -612,7 +752,7 @@ function Store:_validate(project, fields, creating)
     out.labels = parseLabels(fields.labels)
   end
   if fields.assignee ~= nil then
-    out.assignee = util.trim(tostring(fields.assignee))
+    out.assignee = self:resolveAssignee(project, fields.assignee)
   end
   return out
 end
@@ -644,7 +784,8 @@ function Store:createIssue(key, fields)
     status = status,
     priority = v.priority or 0,
     labels = v.labels or {},
-    assignee = v.assignee or "",
+    -- explicit assignee > the column's rule > the project's default
+    assignee = v.assignee or self:ruleAssignee(p, self:column(p, status)) or self:resolveAssignee(p, p.defaultAssignee),
     rank = rank,
     created = now,
     updated = now,
@@ -692,8 +833,12 @@ function Store:updateIssue(id, fields)
   if v.priority and v.priority ~= issue.priority then
     self:_log(issue, "event", "priority " .. Store.PRIORITIES[v.priority + 1]:lower())
   end
+  local moved = v.status and v.status ~= issue.status
   for k, val in pairs(v) do
     issue[k] = val
+  end
+  if moved and v.assignee == nil then
+    self:_applyColumnRule(p, issue)
   end
   issue.updated = self.clock()
   self:_emit("issue", { id = issue.id, actor = self.actor })
@@ -746,6 +891,7 @@ function Store:moveIssue(id, status, index)
   if issue.status ~= target then
     self:_log(issue, "event", "moved " .. self:column(p, issue.status).name .. " → " .. self:column(p, target).name)
     issue.status = target
+    self:_applyColumnRule(p, issue)
   end
   issue.rank = rank
   issue.updated = self.clock()
@@ -809,7 +955,8 @@ end
 
 --- Build a predicate from a search query.
 --- Supports plain words, @assignee, #label, is:status and p:priority tokens.
-function Store.matcher(query)
+--- With a people table, @me and @agent match those names exactly.
+function Store.matcher(query, people)
   query = util.trim(query or "")
   if query == "" then
     return nil
@@ -817,7 +964,12 @@ function Store.matcher(query)
   local tests = {}
   for token in query:gmatch("%S+") do
     local lower = token:lower()
-    if lower:sub(1, 1) == "@" and #lower > 1 then
+    if people and (lower == "@me" or lower == "@agent") then
+      local who = people[lower:sub(2)]:lower()
+      tests[#tests + 1] = function(issue)
+        return issue.assignee:lower() == who
+      end
+    elseif lower:sub(1, 1) == "@" and #lower > 1 then
       local who = lower:sub(2)
       tests[#tests + 1] = function(issue)
         return issue.assignee:lower():find(who, 1, true) ~= nil
@@ -862,7 +1014,8 @@ end
 
 -- Export ---------------------------------------------------------------------
 
-function Store:issueMarkdown(issue, withActivity)
+--- withInstructions adds the column's instructions (what to do with cards in this status).
+function Store:issueMarkdown(issue, withActivity, withInstructions)
   local _, p = self:issue(issue.id)
   local col = p and self:column(p, issue.status)
   local meta = { "Status: " .. (col and col.name or issue.status) }
@@ -879,6 +1032,11 @@ function Store:issueMarkdown(issue, withActivity)
   if util.trim(issue.description) ~= "" then
     out[#out + 1] = ""
     out[#out + 1] = issue.description
+  end
+  if withInstructions and col and col.instructions then
+    out[#out + 1] = ""
+    out[#out + 1] = "### " .. col.name .. " instructions"
+    out[#out + 1] = col.instructions
   end
   if withActivity then
     local comments = {}

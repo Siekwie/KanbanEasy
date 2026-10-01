@@ -13,6 +13,8 @@ local HTTP API.
   fields support selection, word jumps, clipboard, undo and double/triple-click select.
 - **Copy anything**: ID, title, Markdown, Markdown with comments, or a ready-to-paste **agent prompt** that includes
   the task plus the curl commands the agent can use to report progress.
+- **People & rules**: tell the board who "me" and "agent" are, pick a default assignee, and give columns rules
+  like "cards landing in Review go to the agent" plus instructions the agent gets with each task.
 - **Status tracking**: each issue keeps an activity log of moves and assignments, and records who made each change
   (you, or the agent's name). When an agent changes a card, the card briefly glows on the board.
 - **Local API**: plain JSON over HTTP on `127.0.0.1:7420`. No MCP needed. There's a `kb` CLI wrapper too.
@@ -62,6 +64,7 @@ scripts/build.sh all        # Windows zip, macOS app and Linux AppImage in dist/
 | `Enter` / click | Open issue · `E` edit its title |
 | Arrows or `hjkl` | Move the selection · `Shift`+arrows moves the card |
 | `0`–`4` | Priority (none, low, medium, high, urgent) |
+| `M` / `A` | Assign to me / to the agent (press again to unassign) |
 | `Ctrl+C` / `Ctrl+Shift+C` | Copy the selected issue as Markdown / copy its ID |
 | `Ctrl+Shift+P` | Copy an agent prompt for the selected issue |
 | `/` or `Ctrl+F` | Search: words, `@assignee`, `#label`, `p:high`, `is:todo` |
@@ -74,6 +77,33 @@ Right-click a card, column header or project for more actions (rename or add col
 Markdown, and so on). Double-click a column header or project to rename it. In the issue panel, `Tab` moves between
 fields. The description saves when you click away, or with `Ctrl+Enter`.
 
+### People & rules
+
+Each project knows two people: **me** (you) and **agent** (your coding agent). Click the names at the bottom of
+the sidebar (or right-click a project → **People & defaults…**) to set them, and to pick who new issues are assigned
+to. After that, `me` and `agent` work anywhere you'd type a name: the assignee field, quick add (`@agent`), search
+(`@me`), and the API (`assignee=agent`). Renaming one moves their issues to the new name.
+
+Right-click a column header (or use its `⋯` button) to give the column rules:
+
+- **Cards landing here go to** me, the agent, nobody, or someone else. It applies whenever a card enters the
+  column, from the board or the API, and also to the cards already there when you set it. Setting an assignee
+  explicitly in the same change wins over the rule.
+- **Agent instructions**: what to do with cards in this column. Agents get them with the task (the API's
+  `instructions` field, `?format=md`, the copied agent prompt and the agent instructions snippet).
+
+Columns with rules show who cards go to next to the count. For example, a review loop where you make the call and
+the agent writes it up:
+
+```sh
+kb people me=siekwie agent=claude default=me
+kb rule review assign=agent instructions="Read my decision in the comments, write it up in docs/decisions.md, then move the card to done"
+kb rule done assign=-          # optional: done cards are nobody's
+```
+
+The agent then checks its queue with `kb mine agent` (or `GET /issues?assignee=agent`) and reads each task with
+its instructions.
+
 ## For agents: the local API
 
 The app serves JSON on `http://127.0.0.1:7420` while it's running. `curl localhost:7420` prints the full reference.
@@ -85,7 +115,9 @@ Send an `X-Actor: <name>` header so the activity log shows who did what.
 | GET | `/projects` | projects with per-column counts |
 | POST | `/projects` | `{name, key?}` |
 | GET | `/projects/KEY` | a project with all its issues (`?format=md` gives a checklist) |
+| PATCH | `/projects/KEY` | `{name?, me?, agent?, default_assignee?}` |
 | POST | `/projects/KEY/columns` | `{name}` |
+| PATCH | `/projects/KEY/columns/ID` | `{name?, auto_assign?, instructions?}`; `auto_assign` takes `me`, `agent`, a name, `-` (unassign) or `""` (no rule) |
 | GET | `/issues` | filters: `project`, `status`, `assignee`, `label`, `q`, `limit` |
 | POST | `/issues` | `{project?, title, description?, status?, priority?, labels?, assignee?, top?}` |
 | GET | `/issues/KE-12` | one issue with its activity |
@@ -95,7 +127,8 @@ Send an `X-Actor: <name>` header so the activity log shows who did what.
 | DELETE | `/issues/KE-12` | |
 | POST | `/claim` | `{assignee, project?, from?=todo, to?=in_progress}`: takes the next free task |
 
-Statuses are matched loosely: `in_progress`, `In Progress` and `doing` all work. `project` can be left out when you
+Statuses are matched loosely: `in_progress`, `In Progress` and `doing` all work. Assignees can be a name or `me` /
+`agent`. Issues include their column's `instructions` when it has any. `project` can be left out when you
 only have one project; otherwise the project currently open in the app is used.
 
 ```sh
@@ -123,6 +156,9 @@ kb note KE-12 "halfway there"        # comment
 kb mv KE-12 review
 kb set KE-12 assignee= labels=bug,auth
 kb show KE-12
+kb mine agent                        # open issues assigned to the agent
+kb people me=sam agent=claude        # who "me" and "agent" are (no args: show)
+kb rule review assign=agent instructions="..."   # column rules (no args: show)
 ```
 
 Environment: `KB_URL` (default `http://127.0.0.1:7420`), `KB_PROJECT`, `KB_ACTOR` (defaults to `$USER`).

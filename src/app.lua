@@ -118,7 +118,7 @@ function App:toggleTheme()
 end
 
 function App:applySearch()
-  self.filter = Store.matcher(self.search.text)
+  self.filter = Store.matcher(self.search.text, self.project.people)
   ui.dirty = true
 end
 
@@ -135,18 +135,22 @@ end
 --- A ready-to-paste prompt that hands an issue to a coding agent.
 function App:agentPrompt(issue)
   local base = self:apiBase()
-  local md = self.store:issueMarkdown(issue, true)
+  local _, p = self.store:issue(issue.id)
+  local agent = (p or self.project).people.agent
+  local md = self.store:issueMarkdown(issue, true, true)
   return table.concat({
     "Please work on this task from my kanban board.",
     "",
     md,
     "",
-    "Keep the board updated through its local API while you work:",
+    "Keep the board updated through its local API while you work (you are '" .. agent .. "'):",
     "- Mark it in progress: curl -s -X PATCH -d status=in_progress -d assignee=agent "
       .. base
       .. "/issues/"
       .. issue.id,
-    "- Post progress notes: curl -s -H 'X-Actor: agent' --data-urlencode body='<what you did>' "
+    "- Post progress notes: curl -s -H 'X-Actor: "
+      .. agent
+      .. "' --data-urlencode body='<what you did>' "
       .. base
       .. "/issues/"
       .. issue.id
@@ -162,17 +166,27 @@ end
 --- Generic instructions for an agent's system prompt / AGENTS.md.
 function App:agentInstructions()
   local base = self:apiBase()
-  local key = self.project.key
-  return table.concat({
+  local p = self.project
+  local key = p.key
+  local agent = p.people.agent
+  local statuses = {}
+  for i, c in ipairs(p.columns) do
+    statuses[i] = c.id
+  end
+  local lines = {
     "## Task board",
     "",
     "Work is tracked on a local kanban board (KanbanEasy) with an HTTP API at " .. base .. ".",
-    "Project key: " .. key .. ". Statuses: backlog, todo, in_progress, review, done.",
+    "Project key: " .. key .. ". Statuses: " .. table.concat(statuses, ", ") .. ".",
+    "Your name on the board is '" .. agent .. "'; the human is '" .. p.people.me .. "'.",
     "",
     "- See the board:        curl -s '" .. base .. "/projects/" .. key .. "?format=md'",
-    "- Take the next task:   curl -s -d assignee=<your-name> -d project=" .. key .. " " .. base .. "/claim",
+    "- Your queue:           curl -s '" .. base .. "/issues?project=" .. key .. "&assignee=agent&format=md'",
+    "- Take the next todo:   curl -s -d assignee=agent -d project=" .. key .. " " .. base .. "/claim",
     "- Read a task:          curl -s '" .. base .. "/issues/" .. key .. "-1?format=md'",
-    "- Log progress:         curl -s -H 'X-Actor: <your-name>' --data-urlencode body='...' "
+    "- Log progress:         curl -s -H 'X-Actor: "
+      .. agent
+      .. "' --data-urlencode body='...' "
       .. base
       .. "/issues/"
       .. key
@@ -180,9 +194,157 @@ function App:agentInstructions()
     "- Change status:        curl -s -X PATCH -d status=review " .. base .. "/issues/" .. key .. "-1",
     "- Create a task:        curl -s -d project=" .. key .. " -d title='...' -d status=todo " .. base .. "/issues",
     "- Full API reference:   curl -s " .. base,
-    "",
-    "Move a task to review (not done) when you finish; a human will close it.",
-  }, "\n")
+  }
+  local rules = {}
+  for _, c in ipairs(p.columns) do
+    local who = self.store:ruleAssignee(p, c)
+    if who or c.instructions then
+      local line = "- " .. c.name .. " (" .. c.id .. "):"
+      if who then
+        line = line .. (who == "" and " cards are unassigned on entry." or (" cards are assigned to " .. who .. "."))
+      end
+      if c.instructions then
+        line = line .. " " .. c.instructions:gsub("%s*\n%s*", " ")
+      end
+      rules[#rules + 1] = line
+    end
+  end
+  if #rules > 0 then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = 'Column rules (a task\'s "instructions" field repeats the ones for its column):'
+    for _, r in ipairs(rules) do
+      lines[#lines + 1] = r
+    end
+  end
+  lines[#lines + 1] = ""
+  lines[#lines + 1] = "Unless a column's instructions say otherwise, move a task to review (not done) when you finish;"
+    .. " a human will close it."
+  return table.concat(lines, "\n")
+end
+
+-- People & rules ---------------------------------------------------------------------------
+
+--- Assign an issue to "me" or "agent"; doing it again unassigns.
+function App:toggleAssign(issue, role)
+  local _, p = self.store:issue(issue.id)
+  local who = p.people[role]
+  local ok, err = self.store:updateIssue(issue.id, { assignee = issue.assignee == who and "" or who })
+  if not ok then
+    overlay.toast(err, "error")
+  end
+end
+
+function App:assignItems(issue)
+  local _, p = self.store:issue(issue.id)
+  local items = { { header = "Assign to" } }
+  local function add(label, who, hint)
+    items[#items + 1] = {
+      label = label,
+      checked = issue.assignee == who,
+      hint = hint,
+      onSelect = function()
+        self.store:updateIssue(issue.id, { assignee = who })
+      end,
+    }
+  end
+  add("Me (" .. p.people.me .. ")", p.people.me, "M")
+  add("Agent (" .. p.people.agent .. ")", p.people.agent, "A")
+  if issue.assignee ~= "" and issue.assignee ~= p.people.me and issue.assignee ~= p.people.agent then
+    add(issue.assignee, issue.assignee)
+  end
+  add("Nobody", "")
+  return items
+end
+
+function App:peopleDialog(p)
+  p = p or self.project
+  local function show(spec)
+    return spec == "-" and "" or (spec:gsub("^@", ""))
+  end
+  overlay.openModal({
+    title = "People & defaults · " .. p.name,
+    message = 'Who "me" and "agent" are on this board. Type me or agent anywhere you\'d type a name'
+      .. " (assignee, quick add @me, search @agent, the API).",
+    fields = {
+      { key = "me", label = "Me", value = p.people.me, placeholder = "your name" },
+      { key = "agent", label = "Agent", value = p.people.agent, placeholder = "e.g. claude" },
+      {
+        key = "default",
+        label = "New issues are assigned to  (me, agent, a name, or empty)",
+        value = show(p.defaultAssignee),
+        placeholder = "nobody",
+      },
+    },
+    confirm = "Save",
+    onConfirm = function(v)
+      local ok, err = self.store:updateProject(p.key, { me = v.me, agent = v.agent, defaultAssignee = v.default })
+      return not ok and err or nil
+    end,
+  })
+end
+
+function App:setColumnAssign(col, spec)
+  local key = self.project.key
+  local c, n = self.store:setColumnRules(key, col.id, { assign = spec })
+  if not c then
+    overlay.toast(n, "error")
+    return
+  end
+  local who = self.store:ruleAssignee(self.project, c)
+  if who == nil then
+    overlay.toast(col.name .. ": no auto-assign")
+  else
+    local msg = col.name .. ": cards " .. (who == "" and "get unassigned" or ("go to " .. who))
+    if n > 0 then
+      msg = msg .. "  ·  " .. n .. " updated"
+    end
+    overlay.toast(msg)
+  end
+end
+
+function App:customAssignDialog(col)
+  local cur = col.assign
+  overlay.openModal({
+    title = "Auto-assign “" .. col.name .. "”",
+    message = "Cards that land in this column get this assignee. Cards already here are updated too.",
+    fields = {
+      {
+        key = "who",
+        label = "Assignee  (me, agent or a name)",
+        value = (cur and cur ~= "-") and cur:gsub("^@", "") or "",
+        placeholder = "e.g. agent",
+      },
+    },
+    confirm = "Set rule",
+    onConfirm = function(v)
+      if util.trim(v.who) == "" then
+        return "type a name, me or agent"
+      end
+      self:setColumnAssign(col, v.who)
+    end,
+  })
+end
+
+function App:columnInstructionsDialog(col)
+  local key = self.project.key
+  overlay.openModal({
+    title = "Instructions for “" .. col.name .. "”",
+    message = "What should whoever picks up a card here do? Agents get this with the task"
+      .. " (API, agent prompt, agent instructions). Leave empty to remove.",
+    fields = {
+      {
+        key = "text",
+        label = "Instructions",
+        value = col.instructions or "",
+        placeholder = "e.g. Write the decision up in docs/decisions.md, then move the card to Done",
+      },
+    },
+    confirm = "Save",
+    onConfirm = function(v)
+      local ok, err = self.store:setColumnRules(key, col.id, { instructions = v.text })
+      return not ok and err or nil
+    end,
+  })
 end
 
 -- Issue actions -------------------------------------------------------------------------
@@ -455,6 +617,9 @@ function App:cardMenu(issue, x, y)
   for _, item in ipairs(self:copyItems(issue)) do
     items[#items + 1] = item
   end
+  for _, item in ipairs(self:assignItems(issue)) do
+    items[#items + 1] = item
+  end
   items[#items + 1] = { header = "Move to" }
   local _, p = self.store:issue(issue.id)
   for _, col in ipairs(p.columns) do
@@ -523,9 +688,60 @@ function App:priorityMenu(issue, x, y)
   overlay.openMenu(x, y, items)
 end
 
+function App:columnRuleItems(col)
+  local p = self.project
+  local spec = col.assign
+  local custom = spec and spec ~= "@me" and spec ~= "@agent" and spec ~= "-"
+  return {
+    { header = "Cards landing here go to" },
+    {
+      label = "Keep their assignee",
+      checked = spec == nil,
+      onSelect = function()
+        self:setColumnAssign(col, "")
+      end,
+    },
+    {
+      label = "Me (" .. p.people.me .. ")",
+      checked = spec == "@me",
+      onSelect = function()
+        self:setColumnAssign(col, "@me")
+      end,
+    },
+    {
+      label = "Agent (" .. p.people.agent .. ")",
+      checked = spec == "@agent",
+      onSelect = function()
+        self:setColumnAssign(col, "@agent")
+      end,
+    },
+    {
+      label = "Nobody (unassign)",
+      checked = spec == "-",
+      onSelect = function()
+        self:setColumnAssign(col, "-")
+      end,
+    },
+    {
+      label = custom and spec or "Someone else…",
+      checked = custom,
+      onSelect = function()
+        self:customAssignDialog(col)
+      end,
+    },
+    {
+      label = col.instructions and "Edit agent instructions…" or "Agent instructions…",
+      icon = "agent",
+      onSelect = function()
+        self:columnInstructionsDialog(col)
+      end,
+    },
+  }
+end
+
 function App:columnMenu(col, x, y)
   local key = self.project.key
-  overlay.openMenu(x, y, {
+  local items = {
     {
       label = "Add issue",
       icon = "plus",
@@ -589,7 +805,13 @@ function App:columnMenu(col, x, y)
         })
       end,
     },
-  }, { minW = 220 })
+  }
+  -- rules go after "Copy column as Markdown"
+  for i, item in ipairs(self:columnRuleItems(col)) do
+    table.insert(items, 2 + i, item)
+  end
+  table.insert(items, 3, { separator = true })
+  overlay.openMenu(x, y, items, { minW = 240 })
 end
 
 function App:renameColumn(col)
@@ -679,6 +901,13 @@ function App:projectMenu(p, x, y)
       label = "Rename…",
       onSelect = function()
         self:renameProjectDialog(p)
+      end,
+    },
+    {
+      label = "People & defaults…",
+      icon = "agent",
+      onSelect = function()
+        self:peopleDialog(p)
       end,
     },
     {
@@ -805,6 +1034,7 @@ function App:showShortcuts()
       "N  new issue  ·  E  edit title  ·  Enter  open",
       "↑↓←→ / hjkl  select  ·  Shift+arrows  move card",
       "0–4  priority  ·  Del  delete  ·  Ctrl+D  duplicate",
+      "M  assign to me  ·  A  assign to agent  (again to unassign)",
       "Ctrl+C  copy Markdown  ·  Ctrl+Shift+C  copy ID",
       "Ctrl+Shift+P  copy agent prompt",
       "/  Ctrl+F  search  (@who  #label  p:high  is:todo)",
@@ -813,6 +1043,7 @@ function App:showShortcuts()
       "Ctrl+B  sidebar  ·  Esc  close / clear",
       "",
       "Quick add understands  #label  @assignee  !high  (or !!!)",
+      "@me and @agent work in quick add and search; set them in People & defaults",
     }, "\n"),
     confirm = "Got it",
     noCancel = true,
@@ -1010,6 +1241,10 @@ function App:keypressed(key)
     self:deleteIssue(sel.id)
   elseif key:match("^[0-4]$") and sel then
     self.store:updateIssue(sel.id, { priority = tonumber(key) })
+  elseif key == "m" and sel then
+    self:toggleAssign(sel, "me")
+  elseif key == "a" and sel then
+    self:toggleAssign(sel, "agent")
   else
     return false
   end
