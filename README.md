@@ -1,209 +1,57 @@
 # KanbanEasy
 
-A small, fast, native kanban board for keeping track of agentic AI work. Built with [LÖVE](https://love2d.org) (Lua).
-No accounts, no cloud, no config screens. Keep it docked next to your editor, and let your agents update it over a
-local HTTP API.
+[![CI](https://github.com/Siekwie/KanbanEasy/actions/workflows/ci.yml/badge.svg)](https://github.com/Siekwie/KanbanEasy/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/Siekwie/KanbanEasy)](https://github.com/Siekwie/KanbanEasy/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![Board](docs/board.png)
+A small, fast, native kanban board for keeping track of agentic AI work. No accounts, no cloud, no config screens.
+Keep it docked next to your editor and let your coding agents update it over a local HTTP API.
+Built with [LÖVE](https://love2d.org) (Lua). Free and open source under the MIT license.
 
-- **Board**: columns you can drag cards between. Reordering animates smoothly, and there's undo/redo for everything.
-- **Fast capture**: press `N`, type `Fix flaky test #ci @claude !high`, hit Enter. Labels, assignee and priority are
-  parsed out of the title, and the input stays open so you can add the next one straight away.
-- **Everything editable in place**: title, description, status, priority, assignee, labels, comments. The text
-  fields support selection, word jumps, clipboard, undo and double/triple-click select.
-- **Copy anything**: ID, title, Markdown, Markdown with comments, or a ready-to-paste **agent prompt** that includes
-  the task plus the curl commands the agent can use to report progress.
-- **People & rules**: tell the board who "me" and "agent" are, pick a default assignee, and give columns rules
-  like "cards landing in Review go to the agent" plus instructions the agent gets with each task.
-- **Status tracking**: each issue keeps an activity log of moves and assignments, and records who made each change
-  (you, or the agent's name). When an agent changes a card, the card briefly glows on the board.
-- **Local API**: plain JSON over HTTP on `127.0.0.1:7420`. No MCP needed. There's a `kb` CLI wrapper too.
-- **Docks nicely**: below ~540px wide the board switches to a stacked list with collapsible sections. The sidebar
-  becomes a drawer.
-- **Light and dark themes**, plus low idle CPU: the app only redraws when something changes.
+![KanbanEasy board](docs/board.png)
 
 | Issue detail | Docked to the side |
 | --- | --- |
 | ![Detail](docs/detail.png) | ![Narrow](docs/narrow.png) |
 
-## Install / run
+## Download
 
-**Packaged builds** (from the GitHub Releases page, built by CI on every push to `main`, tagged `v1.0.<run>`, or when a `v*` tag is pushed):
+Grab the latest build from the **[Releases page](https://github.com/Siekwie/KanbanEasy/releases/latest)**:
 
 - **Windows**: unzip `KanbanEasy-windows.zip` and run `KanbanEasy.exe`.
 - **macOS**: unzip `KanbanEasy-macos.zip` and move `KanbanEasy.app` to Applications. It isn't signed, so the first
   time, right-click → Open (or run `xattr -dr com.apple.quarantine KanbanEasy.app`).
 - **Linux**: `chmod +x KanbanEasy-x86_64.AppImage && ./KanbanEasy-x86_64.AppImage`
 
-**Build the exe yourself on Windows**: double-click `build.bat` in the repo root. It downloads LÖVE, builds
-`dist\KanbanEasy\KanbanEasy.exe` (keep the DLLs next to it) plus `dist\KanbanEasy-windows.zip`, and opens the folder.
-Or from PowerShell:
+Prefer to build it yourself or run from source? See [docs/BUILDING.md](docs/BUILDING.md).
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1           # dist\KanbanEasy\KanbanEasy.exe + zip
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1 install   # + %LOCALAPPDATA%\Programs, Start Menu shortcut
-powershell -ExecutionPolicy Bypass -File scripts\build.ps1 run       # run from source with an installed LÖVE
-```
+## Quick start
 
-Other targets: `love` (just the `.love` file) and `clean`. Running `install` again updates in place. If the app is
-open, it gets closed first (the board is already saved).
+1. Launch KanbanEasy. Press `N`, type `Fix flaky test #ci @agent !high` and hit Enter.
+2. Drag cards between columns, or press `?` to see every keyboard shortcut.
+3. Hand work to an agent: right-click the API line at the bottom of the sidebar and choose **Copy agent
+   instructions**, then paste that into your `CLAUDE.md` / `AGENTS.md` or system prompt.
 
-**On macOS / Linux**, with [LÖVE 11.5](https://love2d.org) installed:
+## Features
 
-```sh
-love .                      # from the repo root
-scripts/build.sh love       # or build dist/KanbanEasy.love and double-click it
-scripts/build.sh all        # Windows zip, macOS app and Linux AppImage in dist/
-```
+- **Board**: columns you can drag cards between, smooth reordering, and undo/redo for everything.
+- **Fast capture**: labels, assignee and priority are parsed out of the title, and the input stays open for the next card.
+- **Everything editable in place**: title, description, status, priority, assignee, labels, comments.
+- **Copy anything**: ID, title, Markdown, or a ready-to-paste **agent prompt** with the task and the commands to report progress.
+- **People & rules**: tell the board who "me" and "agent" are, and give columns rules like "cards landing in Review go to the agent".
+- **Activity tracking**: every move and assignment is logged with who did it. Cards glow when an agent changes them.
+- **Local API**: plain JSON over HTTP on `127.0.0.1:7420`. No MCP needed. A `kb` CLI wrapper is included.
+- **Docks nicely**: below ~540px wide the board becomes a stacked list. Light and dark themes, low idle CPU.
+- **Your data stays yours**: one human-readable JSON file in `~/KanbanEasy`, with daily backups.
 
-## Using it
+## Documentation
 
-| Key | Action |
-| --- | --- |
-| `N` / `Ctrl+N` | New issue in the selected column (or Todo) |
-| `Enter` / click | Open issue · `E` edit its title |
-| Arrows or `hjkl` | Move the selection · `Shift`+arrows moves the card |
-| `0`–`4` | Priority (none, low, medium, high, urgent) |
-| `M` / `A` | Assign to me / to the agent (press again to unassign) |
-| `Ctrl+C` / `Ctrl+Shift+C` | Copy the selected issue as Markdown / copy its ID |
-| `Ctrl+Shift+P` | Copy an agent prompt for the selected issue |
-| `/` or `Ctrl+F` | Search: words, `@assignee`, `#label`, `p:high`, `is:todo` |
-| `Del` | Delete (undo with `Ctrl+Z`) · `Ctrl+D` duplicate |
-| `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
-| `Ctrl+P`, `Ctrl+1..9` | Switch project |
-| `Ctrl+B` | Toggle sidebar · `?` shows all shortcuts |
+- [Using KanbanEasy](docs/USAGE.md): keyboard shortcuts, people & rules, where your data lives
+- [Local API and `kb` CLI](docs/API.md): everything an agent needs
+- [Building and developing](docs/BUILDING.md): build from source, tests, code layout
+- [Contributing](CONTRIBUTING.md)
 
-Right-click a card, column header or project for more actions (rename or add columns, copy the whole board as
-Markdown, and so on). Double-click a column header or project to rename it. In the issue panel, `Tab` moves between
-fields. The description saves when you click away, or with `Ctrl+Enter`.
+## License
 
-### People & rules
-
-Each project knows two people: **me** (you) and **agent** (your coding agent). Click the names at the bottom of
-the sidebar (or right-click a project → **People & defaults…**) to set them, and to pick who new issues are assigned
-to. After that, `me` and `agent` work anywhere you'd type a name: the assignee field, quick add (`@agent`), search
-(`@me`), and the API (`assignee=agent`). Renaming one moves their issues to the new name.
-
-Right-click a column header (or use its `⋯` button) to give the column rules:
-
-- **Cards landing here go to** me, the agent, nobody, or someone else. It applies whenever a card enters the
-  column, from the board or the API, and also to the cards already there when you set it. Setting an assignee
-  explicitly in the same change wins over the rule.
-- **Agent instructions**: what to do with cards in this column. Agents get them with the task (the API's
-  `instructions` field, `?format=md`, the copied agent prompt and the agent instructions snippet).
-
-Columns with rules show who cards go to next to the count. For example, a review loop where you make the call and
-the agent writes it up:
-
-```sh
-kb people me=siekwie agent=claude default=me
-kb rule review assign=agent instructions="Read my decision in the comments, write it up in docs/decisions.md, then move the card to done"
-kb rule done assign=-          # optional: done cards are nobody's
-```
-
-The agent then checks its queue with `kb mine agent` (or `GET /issues?assignee=agent`) and reads each task with
-its instructions.
-
-## For agents: the local API
-
-The app serves JSON on `http://127.0.0.1:7420` while it's running. `curl localhost:7420` prints the full reference.
-Bodies can be JSON or form-encoded (`curl -d key=value`). Add `?format=md` to GET requests to get Markdown back.
-Send an `X-Actor: <name>` header so the activity log shows who did what.
-
-| Method | Path | |
-| --- | --- | --- |
-| GET | `/projects` | projects with per-column counts |
-| POST | `/projects` | `{name, key?}` |
-| GET | `/projects/KEY` | a project with all its issues (`?format=md` gives a checklist) |
-| PATCH | `/projects/KEY` | `{name?, me?, agent?, default_assignee?}` |
-| POST | `/projects/KEY/columns` | `{name}` |
-| PATCH | `/projects/KEY/columns/ID` | `{name?, auto_assign?, instructions?}`; `auto_assign` takes `me`, `agent`, a name, `-` (unassign) or `""` (no rule) |
-| GET | `/issues` | filters: `project`, `status`, `assignee`, `label`, `q`, `limit` |
-| POST | `/issues` | `{project?, title, description?, status?, priority?, labels?, assignee?, top?}` |
-| GET | `/issues/KE-12` | one issue with its activity |
-| PATCH | `/issues/KE-12` | any of `title, description, status, priority, labels, assignee` |
-| POST | `/issues/KE-12/move` | `{status, index?}` |
-| POST | `/issues/KE-12/comments` | `{body}` |
-| DELETE | `/issues/KE-12` | |
-| POST | `/claim` | `{assignee, project?, from?=todo, to?=in_progress}`: takes the next free task |
-
-Statuses are matched loosely: `in_progress`, `In Progress` and `doing` all work. Assignees can be a name or `me` /
-`agent`. Issues include their column's `instructions` when it has any. `project` can be left out when you
-only have one project; otherwise the project currently open in the app is used.
-
-```sh
-curl -s 'localhost:7420/projects/KE?format=md'                       # what's on the board
-curl -s -d assignee=claude localhost:7420/claim                       # take the next todo
-curl -s -H 'X-Actor: claude' --data-urlencode body='Tests pass' localhost:7420/issues/KE-7/comments
-curl -s -X PATCH -d status=review localhost:7420/issues/KE-7          # hand it back for review
-curl -s -d title='Follow-up: flaky retry test' -d status=backlog localhost:7420/issues
-```
-
-**Wiring it into an agent:** right-click the API line at the bottom of the sidebar and choose **Copy agent
-instructions**. That puts a short "here's your task board and how to use it" snippet on your clipboard for
-`CLAUDE.md` / `AGENTS.md` or a system prompt. To hand an agent a single task, use **Agent prompt** in the issue panel.
-
-### `kb` CLI
-
-`bin/kb` is a small bash + curl wrapper. Put it on your `PATH` if you like:
-
-```sh
-kb                                   # board as markdown
-kb ls todo                           # issues in a status
-kb add "Fix login redirect" status=todo priority=high labels=bug
-kb claim claude                      # take the next todo
-kb note KE-12 "halfway there"        # comment
-kb mv KE-12 review
-kb set KE-12 assignee= labels=bug,auth
-kb show KE-12
-kb mine agent                        # open issues assigned to the agent
-kb people me=sam agent=claude        # who "me" and "agent" are (no args: show)
-kb rule review assign=agent instructions="..."   # column rules (no args: show)
-```
-
-Environment: `KB_URL` (default `http://127.0.0.1:7420`), `KB_PROJECT`, `KB_ACTOR` (defaults to `$USER`).
-
-### Security
-
-The server binds to `127.0.0.1` only. It rejects requests that carry browser headers (`Origin`, `Sec-Fetch-Site`)
-or a non-local `Host`, so a web page you visit can't reach it and DNS-rebinding tricks don't work. Anything running
-locally as you can use it. That's intentional.
-
-## Data
-
-Everything lives in a single, human-readable JSON file in a `KanbanEasy` folder in your user directory:
-
-- Windows: `C:\Users\<you>\KanbanEasy\board.json`
-- macOS: `/Users/<you>/KanbanEasy/board.json`
-- Linux: `~/KanbanEasy/board.json`
-
-Keys are sorted so the file diffs cleanly in git. The first launch of each day saves a snapshot to `backups/` next
-to it, one per weekday, so you always have the last week. Click the path at the bottom of the sidebar to open the
-folder; right-click it to copy the path. The file is watched, so if you edit it by hand (or `git pull` it) the app
-reloads it, and Ctrl+Z undoes the reload.
-
-Earlier builds kept the board in the OS app-data folder (`%APPDATA%\KanbanEasy` on Windows). If one is found there,
-it's copied to the new folder on first launch. The old file is left untouched.
-
-| Env var | |
-| --- | --- |
-| `KANBANEASY_DATA` | use a different board file, e.g. one inside a project repo |
-| `KANBANEASY_PORT` | API port (default `7420`) |
-| `KANBANEASY_NO_API=1` | don't start the API |
-
-## Development
-
-```sh
-busted            # unit tests (store, API, JSON)
-luacheck .        # lint
-stylua .          # format
-love .            # run
-```
-
-Layout: `src/store.lua` is the data model (pure Lua). `src/api.lua` is the HTTP router (pure Lua) and
-`src/server.lua` is the non-blocking LuaSocket server. `src/persist.lua` handles saving. `src/app.lua` wires it all
-together, and `src/ui/` holds the views (`board`, `detail`, `chrome`, `overlay`) plus a small immediate-mode core
-and a text editor widget.
-
-Fonts: [Inter](https://rsms.me/inter/) and [JetBrains Mono](https://www.jetbrains.com/lp/mono/), both under the
-SIL Open Font License (see `assets/fonts/`).
+[MIT](LICENSE) © 2026 Jannik Wiest. Bundled fonts: [Inter](https://rsms.me/inter/) and
+[JetBrains Mono](https://www.jetbrains.com/lp/mono/), both under the SIL Open Font License (see `assets/fonts/`).
