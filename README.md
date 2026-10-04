@@ -28,7 +28,7 @@ local HTTP API.
 
 ## Install / run
 
-**Packaged builds** (from the GitHub Releases page, built by CI when a `v*` tag is pushed):
+**Packaged builds** (from the GitHub Releases page, built by CI on every push to `main`, tagged `v1.0.<run>`, or when a `v*` tag is pushed):
 
 - **Windows**: unzip `KanbanEasy-windows.zip` and run `KanbanEasy.exe`.
 - **macOS**: unzip `KanbanEasy-macos.zip` and move `KanbanEasy.app` to Applications. It isn't signed, so the first
