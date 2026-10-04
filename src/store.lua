@@ -115,6 +115,7 @@ function Store.normalize(data)
       issue.rank = issue.rank or i * RANK_STEP
       issue.created = issue.created or os.time()
       issue.updated = issue.updated or issue.created
+      issue.rev = issue.rev or 1
       local valid = false
       for _, c in ipairs(p.columns) do
         if c.id == issue.status then
@@ -469,7 +470,7 @@ function Store:setColumnRules(key, id, fields)
   if fields.assign ~= nil then
     for _, issue in ipairs(self:issuesIn(p, c.id)) do
       if self:_applyColumnRule(p, issue) then
-        issue.updated = self.clock()
+        self:_touch(issue)
         n = n + 1
       end
     end
@@ -708,6 +709,12 @@ local function parseLabels(v)
   return util.parseList(tostring(v or ""))
 end
 
+--- Mark an issue as changed: bumps `updated` and `rev`, which API clients use to detect stale writes.
+function Store:_touch(issue)
+  issue.updated = self.clock()
+  issue.rev = (issue.rev or 1) + 1
+end
+
 function Store:_log(issue, kind, body, author)
   table.insert(issue.activity, {
     kind = kind,
@@ -789,6 +796,7 @@ function Store:createIssue(key, fields)
     rank = rank,
     created = now,
     updated = now,
+    rev = 1,
     activity = {},
   }
   p.nextNum = p.nextNum + 1
@@ -840,7 +848,7 @@ function Store:updateIssue(id, fields)
   if moved and v.assignee == nil then
     self:_applyColumnRule(p, issue)
   end
-  issue.updated = self.clock()
+  self:_touch(issue)
   self:_emit("issue", { id = issue.id, actor = self.actor })
   return issue
 end
@@ -894,7 +902,7 @@ function Store:moveIssue(id, status, index)
     self:_applyColumnRule(p, issue)
   end
   issue.rank = rank
-  issue.updated = self.clock()
+  self:_touch(issue)
   self:_emit("issue", { id = issue.id, moved = true, actor = self.actor })
   return issue
 end
@@ -926,7 +934,7 @@ function Store:addComment(id, body, author)
   end
   self:_checkpoint()
   self:_log(issue, "comment", body, author)
-  issue.updated = self.clock()
+  self:_touch(issue)
   self:_emit("issue", { id = issue.id, comment = true, actor = author or self.actor })
   return issue.activity[#issue.activity]
 end

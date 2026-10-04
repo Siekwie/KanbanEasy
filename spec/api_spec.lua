@@ -93,6 +93,42 @@ describe("api", function()
     assert.equal(404, s)
   end)
 
+  it("lets only one of two claims win a single free card", function()
+    call(store, "POST", "/issues", { title = "Only one", status = "todo" })
+    local s1, a = call(store, "POST", "/claim", { assignee = "claude" })
+    local s2 = call(store, "POST", "/claim", { assignee = "codex" })
+    assert.equal(200, s1)
+    assert.equal("claude", a.assignee)
+    assert.equal(404, s2)
+    assert.equal("claude", store:issue("MAIN-1").assignee)
+  end)
+
+  it("rejects stale writes that carry an outdated rev", function()
+    local _, issue = call(store, "POST", "/issues", { title = "Shared", status = "todo" })
+    local _, claimed = call(store, "POST", "/claim", { assignee = "claude" })
+    assert.truthy(claimed.rev > issue.rev)
+    -- the human takes the card back, which bumps the rev
+    local s, back = call(store, "PATCH", "/issues/MAIN-1", { assignee = "sam", status = "review" })
+    assert.equal(200, s)
+    assert.truthy(back.rev > claimed.rev)
+    -- the agent, still holding the rev from its claim, must not move it
+    local body
+    s, body = call(store, "PATCH", "/issues/MAIN-1", { status = "done" }, { ["if-match"] = tostring(claimed.rev) })
+    assert.equal(409, s)
+    assert.equal("sam", body.current.assignee)
+    assert.equal(back.rev, body.current.rev)
+    assert.equal("review", store:issue("MAIN-1").status)
+    assert.equal(409, (call(store, "POST", "/issues/MAIN-1/move", { status = "done", rev = claimed.rev })))
+    assert.equal(409, (call(store, "POST", "/issues/MAIN-1/comments", { body = "x", rev = claimed.rev })))
+    assert.equal(409, (call(store, "DELETE", "/issues/MAIN-1", nil, { ["if-match"] = tostring(claimed.rev) })))
+    -- with the current rev (quoted ETag style too) it goes through
+    s = call(store, "PATCH", "/issues/MAIN-1", { status = "done" }, { ["if-match"] = '"' .. back.rev .. '"' })
+    assert.equal(200, s)
+    assert.equal("done", store:issue("MAIN-1").status)
+    -- without a rev nothing changes: the plain curl flow still works
+    assert.equal(200, (call(store, "PATCH", "/issues/MAIN-1", { priority = "high" })))
+  end)
+
   it("sets people and column rules", function()
     local s, proj = call(store, "PATCH", "/projects/MAIN", { me = "sam", agent = "claude", default_assignee = "me" })
     assert.equal(200, s)

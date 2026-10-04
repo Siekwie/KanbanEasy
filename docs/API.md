@@ -21,6 +21,11 @@ Send an `X-Actor: <name>` header so the activity log shows who did what.
 | DELETE | `/issues/KE-12` | |
 | POST | `/claim` | `{assignee, project?, from?=todo, to?=in_progress}`: takes the next free task |
 
+Every issue carries a `rev` that grows with each change. To avoid overwriting a card that changed since you read it,
+send the `rev` back as `If-Match: <rev>` (or a `rev` field) on `PATCH`, `move`, `comments` and `DELETE`. A stale rev
+gets `409` with the card's current state in `current`. It's optional: without it the write goes through as before.
+`/claim` is atomic (the server handles one request at a time), so two simultaneous claims never get the same card.
+
 Statuses are matched loosely: `in_progress`, `In Progress` and `doing` all work. Assignees can be a name or `me` /
 `agent`. Issues include their column's `instructions` when it has any. `project` can be left out when you
 only have one project; otherwise the project currently open in the app is used.

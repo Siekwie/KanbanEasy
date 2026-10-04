@@ -28,6 +28,9 @@ currently open in the app is used otherwise.
   POST   /issues                   {project?, title, description?, status?, priority?, labels?, assignee?, top?}
   GET    /issues/ID                one issue with activity           (?format=md)
   PATCH  /issues/ID                any of {title, description, status, priority, labels, assignee}
+                                   every issue has a `rev` that grows with each change; send it back as
+                                   `If-Match: <rev>` (or a `rev` field) on PATCH, move, comments and DELETE
+                                   to get 409 instead of overwriting a card that changed since you read it
   POST   /issues/ID/move           {status, index?}  (index is 1-based within the column)
   POST   /issues/ID/comments       {body, author?}
   DELETE /issues/ID
@@ -100,6 +103,7 @@ local function issueJSON(store, issue, project, withActivity)
     assignee = issue.assignee,
     created = util.isoTime(issue.created),
     updated = util.isoTime(issue.updated),
+    rev = issue.rev,
   }
   local list = store:issuesIn(project, issue.status)
   out.position = util.indexOf(list, issue)
@@ -111,6 +115,27 @@ local function issueJSON(store, issue, project, withActivity)
     out.activity = act
   end
   return out
+end
+
+--- Optional optimistic-concurrency check. A caller that sends `If-Match` (or a `rev` field) is
+--- rejected with 409 when the issue changed since it read it. Returns nil when the write may go on.
+local function staleRev(store, req, id)
+  local sent = req.headers["if-match"] or req.body.rev
+  if sent == nil or sent == "" then
+    return nil
+  end
+  local issue, p = store:issue(id)
+  if not issue then
+    return nil -- the handler reports the 404
+  end
+  if tonumber(tostring(sent):match("%d+")) == issue.rev then
+    return nil
+  end
+  local cur = issueJSON(store, issue, p, false)
+  return response(409, {
+    error = ("issue %s changed since you read it (your rev %s, current %d)"):format(issue.id, tostring(sent), issue.rev),
+    current = cur,
+  })
 end
 
 local function columnJSON(store, p, c)
@@ -369,6 +394,10 @@ end)
 
 route("PATCH", { "issues", ":id" }, function(store, req, id)
   local b = req.body
+  local stale = staleRev(store, req, id)
+  if stale then
+    return stale
+  end
   local issue, e = store:updateIssue(id, {
     title = b.title,
     description = b.description,
@@ -390,6 +419,10 @@ route("POST", { "issues", ":id" }, function(store, req, id)
 end)
 
 route("POST", { "issues", ":id", "move" }, function(store, req, id)
+  local stale = staleRev(store, req, id)
+  if stale then
+    return stale
+  end
   local issue, e = store:moveIssue(id, req.body.status, tonumber(req.body.index))
   if not issue then
     return err(e:find("^no issue") and 404 or 400, e)
@@ -399,6 +432,10 @@ route("POST", { "issues", ":id", "move" }, function(store, req, id)
 end)
 
 route("POST", { "issues", ":id", "comments" }, function(store, req, id)
+  local stale = staleRev(store, req, id)
+  if stale then
+    return stale
+  end
   local entry, e =
     store:addComment(id, req.body.body or req.body.text or req.body.comment, req.body.author or req.actor)
   if not entry then
@@ -407,7 +444,11 @@ route("POST", { "issues", ":id", "comments" }, function(store, req, id)
   return response(201, { author = entry.author, body = entry.body, time = util.isoTime(entry.time) })
 end)
 
-route("DELETE", { "issues", ":id" }, function(store, _, id)
+route("DELETE", { "issues", ":id" }, function(store, req, id)
+  local stale = staleRev(store, req, id)
+  if stale then
+    return stale
+  end
   local ok, e = store:deleteIssue(id)
   if not ok then
     return err(404, e)
