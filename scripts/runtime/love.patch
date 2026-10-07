@@ -1,0 +1,75 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index dfb44de..78e42b5 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -176,6 +176,15 @@ if(MEGA)
+ 		# MEGA_LUA51 is a CMake target, so includes are handled
+ 		# automatically.
+ 	endif()
++
++	if(MEGA_STATIC)
++		# Everything is linked into the executable: there are no DLLs to move
++		# or bundle. (mpg123 needs shlwapi, which its DLL build links itself.)
++		set(LOVE_MSVC_DLLS)
++		set(LOVE_MOVE_DLLS)
++		set(LOVE_EXTRA_DLLS)
++		set(LOVE_LINK_LIBRARIES ${LOVE_LINK_LIBRARIES} shlwapi)
++	endif()
+ else()
+ 	if(MSVC)
+ 		message(FATAL_ERROR "
+@@ -1773,10 +1782,15 @@ if(MSVC OR MINGW)
+ 		dwmapi${WIN32_LIB_EXT}
+ 	)
+ 
+-	set(LOVE_RC
+-		extra/windows/love.rc
+-		extra/windows/love.ico
+-	)
++	if(LOVE_APP_RC)
++		# The resource script (icon, version info) of a fused game.
++		set(LOVE_RC ${LOVE_APP_RC})
++	else()
++		set(LOVE_RC
++			extra/windows/love.rc
++			extra/windows/love.ico
++		)
++	endif()
+ 
+ 	if(MINGW)
+ 		# UTF-16 flags passed to windres. windres invokes gcc as preprocessor
+@@ -1785,7 +1799,11 @@ if(MSVC OR MINGW)
+ 	endif()
+ endif()
+ 
+-add_library(${LOVE_LIB_NAME} SHARED ${LOVE_LIB_SRC} ${LOVE_RC})
++if(MEGA_STATIC)
++	add_library(${LOVE_LIB_NAME} STATIC ${LOVE_LIB_SRC})
++else()
++	add_library(${LOVE_LIB_NAME} SHARED ${LOVE_LIB_SRC} ${LOVE_RC})
++endif()
+ set_target_properties(${LOVE_LIB_NAME} PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+ target_link_libraries(${LOVE_LIB_NAME} ${LOVE_LINK_LIBRARIES} ${LOVE_3P})
+ 
+@@ -1793,7 +1811,7 @@ if(LOVE_EXTRA_DEPENDECIES)
+ 	add_dependencies(${LOVE_LIB_NAME} ${LOVE_EXTRA_DEPENDECIES})
+ endif()
+ 
+-if(MSVC)
++if(MSVC AND NOT MEGA_STATIC)
+ 	set_target_properties(${LOVE_LIB_NAME} PROPERTIES RELEASE_OUTPUT_NAME "love" PDB_NAME "liblove" IMPORT_PREFIX "lib")
+ 	set_target_properties(${LOVE_LIB_NAME} PROPERTIES DEBUG_OUTPUT_NAME "love" PDB_NAME "liblove" IMPORT_PREFIX "lib")
+ endif()
+diff --git a/src/libraries/luasocket/libluasocket/compat.h b/src/libraries/luasocket/libluasocket/compat.h
+index 7bf8010..d8dde31 100644
+--- a/src/libraries/luasocket/libluasocket/compat.h
++++ b/src/libraries/luasocket/libluasocket/compat.h
+@@ -5,6 +5,8 @@
+ #include "lauxlib.h"
+ 
+ #if LUA_VERSION_NUM==501
++/* LuaJIT has a luaL_setfuncs of its own: the two collide when linked statically. */
++#define luaL_setfuncs luasocket_setfuncs
+ void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup);
+ #endif
+ 

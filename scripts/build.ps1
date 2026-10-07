@@ -3,10 +3,11 @@
   Build (and optionally install) KanbanEasy on Windows.
 
 .DESCRIPTION
-  windows  (default) dist\KanbanEasy\KanbanEasy.exe + DLLs, and dist\KanbanEasy-windows.zip
+  windows  (default) dist\KanbanEasy.exe: one self-contained file, no DLLs
   love     dist\KanbanEasy.love (run it with an installed LOVE 11.5)
   install  build, copy to %LOCALAPPDATA%\Programs\KanbanEasy and add a Start Menu shortcut
   run      run from source with an installed LOVE (love.exe on PATH or in Program Files)
+  runtime  build the Windows runtime from source instead of downloading it (scripts\runtime)
   clean    remove dist\ and .build-cache\
 
   macOS / Linux packages: use scripts/build.sh (or push a v* tag and let CI build them).
@@ -16,7 +17,7 @@
   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 install
 #>
 param(
-  [ValidateSet('windows', 'love', 'install', 'run', 'clean')]
+  [ValidateSet('windows', 'love', 'install', 'run', 'runtime', 'clean')]
   [string]$Target = 'windows'
 )
 
@@ -25,12 +26,13 @@ $ProgressPreference = 'SilentlyContinue' # Invoke-WebRequest is painfully slow w
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
-$LoveVersion = '11.5'
 $App = 'KanbanEasy'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Dist = Join-Path $Root 'dist'
 $Cache = Join-Path $Root '.build-cache'
 $GameFiles = @('main.lua', 'conf.lua', 'src', 'assets')
+$RuntimeVersion = (Get-Content (Join-Path $PSScriptRoot 'runtime\version.txt') -TotalCount 1).Trim()
+$RuntimeUrl = "https://github.com/Siekwie/KanbanEasy/releases/download/runtime-$RuntimeVersion"
 
 function Step([string]$msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
@@ -58,14 +60,14 @@ function New-Zip([string]$Destination, [string]$BaseDir, [string[]]$Items) {
   }
 }
 
-function Get-LoveZip {
-  $file = "love-$LoveVersion-win64.zip"
-  $path = Join-Path $Cache $file
+# The runtime is LOVE built as one statically linked exe with our icon (see scripts\runtime).
+# CI publishes it as a release. One you built yourself is already in the cache and wins.
+function Get-RuntimeFile([string]$Name) {
+  $path = Join-Path $Cache "runtime-$RuntimeVersion\$Name"
   if (-not (Test-Path $path)) {
-    Step "Downloading $file"
-    New-Item -ItemType Directory -Force $Cache | Out-Null
-    $url = "https://github.com/love2d/love/releases/download/$LoveVersion/$file"
-    Invoke-WebRequest -Uri $url -OutFile "$path.part" -UseBasicParsing
+    Step "Downloading $Name (runtime $RuntimeVersion)"
+    New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+    Invoke-WebRequest -Uri "$RuntimeUrl/$Name" -OutFile "$path.part" -UseBasicParsing
     Move-Item "$path.part" $path -Force
   }
   return $path
@@ -81,37 +83,22 @@ function Build-Love {
 
 function Build-Windows {
   $lovePath = Build-Love
-  $loveZip = Get-LoveZip
-  $work = Join-Path $Cache 'win'
-  if (Test-Path $work) { Remove-Item $work -Recurse -Force }
-  Expand-Archive -Path $loveZip -DestinationPath $work -Force
-  $runtime = Join-Path $work "love-$LoveVersion-win64"
+  $runtime = Get-RuntimeFile "$App-runtime-win64.exe"
 
-  $out = Join-Path $Dist $App
-  if (Test-Path $out) { Remove-Item $out -Recurse -Force }
-  New-Item -ItemType Directory -Force $out | Out-Null
-
-  # A fused game is just love.exe with the .love archive appended.
-  $exe = Join-Path $out "$App.exe"
+  # A fused game is just the runtime with the .love archive appended.
+  $exe = Join-Path $Dist "$App.exe"
   $stream = [IO.File]::Create($exe)
   try {
-    foreach ($part in @((Join-Path $runtime 'love.exe'), $lovePath)) {
+    foreach ($part in @($runtime, $lovePath)) {
       $bytes = [IO.File]::ReadAllBytes($part)
       $stream.Write($bytes, 0, $bytes.Length)
     }
   } finally {
     $stream.Dispose()
   }
-  Copy-Item (Join-Path $runtime '*.dll') $out
-  Copy-Item (Join-Path $runtime 'license.txt') (Join-Path $out 'LOVE-license.txt')
-  Copy-Item (Join-Path $Root 'assets\icon.ico') $out
-  Copy-Item (Join-Path $Root 'README.md') $out
-
-  $zipPath = Join-Path $Dist "$App-windows.zip"
-  $items = Get-ChildItem $out | ForEach-Object { Join-Path $App $_.Name }
-  New-Zip -Destination $zipPath -BaseDir $Dist -Items $items
-  Step "Built dist\$App\$App.exe and dist\$App-windows.zip"
-  return $out
+  Copy-Item (Get-RuntimeFile 'LOVE-license.txt') $Dist -Force
+  Step "Built dist\$App.exe"
+  return $exe
 }
 
 function Install-App {
@@ -126,15 +113,16 @@ function Install-App {
   }
   if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
   New-Item -ItemType Directory -Force $dest | Out-Null
-  Copy-Item (Join-Path $built '*') $dest -Recurse
+  $exe = Join-Path $dest "$App.exe"
+  Copy-Item $built $exe
 
   $programs = [Environment]::GetFolderPath('Programs')
   $lnk = Join-Path $programs "$App.lnk"
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut($lnk)
-  $shortcut.TargetPath = Join-Path $dest "$App.exe"
+  $shortcut.TargetPath = $exe
   $shortcut.WorkingDirectory = $dest
-  $shortcut.IconLocation = Join-Path $dest 'icon.ico'
+  $shortcut.IconLocation = "$exe,0"
   $shortcut.Description = 'Kanban board for agentic work'
   $shortcut.Save()
   Step "Installed to $dest"
@@ -158,6 +146,7 @@ switch ($Target) {
   'windows' { Build-Windows | Out-Null }
   'install' { Install-App }
   'run' { & (Find-Love) $Root }
+  'runtime' { & (Join-Path $PSScriptRoot 'runtime\build-runtime.ps1') }
   'clean' {
     foreach ($dir in @($Dist, $Cache)) {
       if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }

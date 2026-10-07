@@ -18,7 +18,8 @@ Built with [LÖVE](https://love2d.org) (Lua). Free and open source under the MIT
 
 Grab the latest build from the **[Releases page](https://github.com/Siekwie/KanbanEasy/releases/latest)**:
 
-- **Windows**: unzip `KanbanEasy-windows.zip` and run `KanbanEasy.exe`.
+- **Windows**: download `KanbanEasy.exe` and run it. It is a single file with nothing to install, so keep it
+  wherever you like.
 - **macOS**: unzip `KanbanEasy-macos.zip` and move `KanbanEasy.app` to Applications. It isn't signed, so the first
   time, right-click → Open (or run `xattr -dr com.apple.quarantine KanbanEasy.app`).
 - **Linux**: `chmod +x KanbanEasy-x86_64.AppImage && ./KanbanEasy-x86_64.AppImage`
@@ -55,3 +56,5 @@ Prefer to build it yourself or run from source? See [docs/BUILDING.md](docs/BUIL
 
 [MIT](LICENSE) © 2026 Jannik Wiest. Bundled fonts: [Inter](https://rsms.me/inter/) and
 [JetBrains Mono](https://www.jetbrains.com/lp/mono/), both under the SIL Open Font License (see `assets/fonts/`).
+The packaged builds contain [LÖVE](https://love2d.org) and the libraries it uses. Their licenses are in
+`LOVE-license.txt`, next to each release's downloads.

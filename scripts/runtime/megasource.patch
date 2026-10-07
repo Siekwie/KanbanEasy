@@ -1,0 +1,79 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7a65db6..aa3ae06 100755
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -11,6 +11,9 @@ project(megasource)
+ 
+ set(MEGA TRUE)
+ 
++# Link every library (and the C runtime) into the love executable, so it needs no DLLs.
++option(MEGA_STATIC "Build one self-contained executable" OFF)
++
+ set (CMAKE_CXX_STANDARD 11)
+ 
+ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+@@ -220,7 +223,11 @@ message(STATUS "-----------------------------------------------------")
+ message(STATUS "Configuring: mpg123 ${MEGA_MPG123_VER}")
+ message(STATUS "-----------------------------------------------------")
+ add_subdirectory("libs/mpg123-${MEGA_MPG123_VER}" ${CMAKE_BINARY_DIR}/mpg123)
+-set(MEGA_MPEG123 mpg123)
++if(MEGA_STATIC)
++	set(MEGA_MPEG123 mpg123-static)
++else()
++	set(MEGA_MPEG123 mpg123)
++endif()
+ 
+ message(STATUS "-----------------------------------------------------")
+ message(STATUS "Configuring: freetype ${MEGA_FREETYPE_VER}")
+@@ -232,7 +239,11 @@ message(STATUS "-----------------------------------------------------")
+ message(STATUS "Configuring: SDL2 ${MEGA_SDL2_VER}")
+ message(STATUS "-----------------------------------------------------")
+ add_subdirectory("libs/SDL2" ${CMAKE_BINARY_DIR}/SDL2)
+-set(MEGA_SDL2 SDL2)
++if(MEGA_STATIC)
++	set(MEGA_SDL2 SDL2-static)
++else()
++	set(MEGA_SDL2 SDL2)
++endif()
+ set(MEGA_SDL2MAIN SDL2main)
+ 
+ message(STATUS "-----------------------------------------------------")
+@@ -271,17 +282,29 @@ if(MSVC)
+ 
+ 	file(WRITE ${MEGA_LUAJIT_SOURCE_DIR}/megabuild.bat ${MEGA_LUAJIT_BUILD_BAT})
+ 
+-	ExternalProject_Add(luajit
+-		SOURCE_DIR ${MEGA_LUAJIT_SOURCE_DIR}
+-		BUILD_IN_SOURCE 1
+-		CONFIGURE_COMMAND ""
+-		BUILD_COMMAND "${MEGA_LUAJIT_SOURCE_DIR}/megabuild.bat" $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:debug> $<$<NOT:$<CONFIG:Debug>>:amalg>
+-		INSTALL_COMMAND cmake -E make_directory ${CMAKE_BINARY_DIR}/bin
+-			COMMAND cmake -E copy ${MEGA_LUAJIT_SOURCE_DIR}/src/lua51.dll ${CMAKE_BINARY_DIR}/bin
+-			COMMAND cmake -E copy ${MEGA_LUAJIT_SOURCE_DIR}/src/lua51.lib ${CMAKE_BINARY_DIR}/bin)
++	if(MEGA_STATIC)
++		# "msvcbuild.bat static" makes lua51.lib a static library and no DLL.
++		ExternalProject_Add(luajit
++			SOURCE_DIR ${MEGA_LUAJIT_SOURCE_DIR}
++			BUILD_IN_SOURCE 1
++			CONFIGURE_COMMAND ""
++			BUILD_COMMAND "${MEGA_LUAJIT_SOURCE_DIR}/megabuild.bat" static
++			INSTALL_COMMAND cmake -E make_directory ${CMAKE_BINARY_DIR}/bin
++				COMMAND cmake -E copy ${MEGA_LUAJIT_SOURCE_DIR}/src/lua51.lib ${CMAKE_BINARY_DIR}/bin)
++	else()
++		ExternalProject_Add(luajit
++			SOURCE_DIR ${MEGA_LUAJIT_SOURCE_DIR}
++			BUILD_IN_SOURCE 1
++			CONFIGURE_COMMAND ""
++			BUILD_COMMAND "${MEGA_LUAJIT_SOURCE_DIR}/megabuild.bat" $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:debug> $<$<NOT:$<CONFIG:Debug>>:amalg>
++			INSTALL_COMMAND cmake -E make_directory ${CMAKE_BINARY_DIR}/bin
++				COMMAND cmake -E copy ${MEGA_LUAJIT_SOURCE_DIR}/src/lua51.dll ${CMAKE_BINARY_DIR}/bin
++				COMMAND cmake -E copy ${MEGA_LUAJIT_SOURCE_DIR}/src/lua51.lib ${CMAKE_BINARY_DIR}/bin)
++
++		set(MEGA_LUAJIT_DLL ${CMAKE_BINARY_DIR}/bin/lua51.dll)
++	endif()
+ 
+ 	set(MEGA_LUAJIT_LIB ${CMAKE_BINARY_DIR}/bin/lua51.lib)
+-	set(MEGA_LUAJIT_DLL ${CMAKE_BINARY_DIR}/bin/lua51.dll)
+ 	set(MEGA_LUAJIT_INCLUDE ${MEGA_LUAJIT_SOURCE_DIR}/src)
+ 
+ endif()

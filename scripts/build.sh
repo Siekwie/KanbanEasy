@@ -2,7 +2,7 @@
 # Build KanbanEasy packages into dist/. (On Windows, use scripts/build.ps1.)
 #
 #   scripts/build.sh love     dist/KanbanEasy.love          (run with: love KanbanEasy.love)
-#   scripts/build.sh windows  dist/KanbanEasy-windows.zip   (KanbanEasy.exe + LÖVE runtime)
+#   scripts/build.sh windows  dist/KanbanEasy.exe           (one self-contained file, no DLLs)
 #   scripts/build.sh macos    dist/KanbanEasy-macos.zip     (KanbanEasy.app, unsigned)
 #   scripts/build.sh linux    dist/KanbanEasy-x86_64.AppImage
 #   scripts/build.sh all
@@ -15,6 +15,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
 CACHE="$ROOT/.build-cache"
 APP=KanbanEasy
+RUNTIME_VERSION="$(head -n 1 "$ROOT/scripts/runtime/version.txt" | tr -d '[:space:]')"
+RUNTIME_URL="https://github.com/Siekwie/KanbanEasy/releases/download/runtime-$RUNTIME_VERSION"
 mkdir -p "$DIST" "$CACHE"
 
 fetch() {
@@ -26,6 +28,18 @@ fetch() {
   fi
 }
 
+# The Windows runtime is LÖVE built as one statically linked exe with our icon
+# (see scripts/runtime). CI publishes it as a release.
+fetch_runtime() {
+  local file="$1" dir="$CACHE/runtime-$RUNTIME_VERSION"
+  if [[ ! -f "$dir/$file" ]]; then
+    echo "downloading $file (runtime $RUNTIME_VERSION)"
+    mkdir -p "$dir"
+    curl -fsSL -o "$dir/$file.part" "$RUNTIME_URL/$file"
+    mv "$dir/$file.part" "$dir/$file"
+  fi
+}
+
 build_love() {
   rm -f "$DIST/$APP.love"
   (cd "$ROOT" && zip -9 -qr "$DIST/$APP.love" main.lua conf.lua src assets -x '*.DS_Store')
@@ -34,20 +48,13 @@ build_love() {
 
 build_windows() {
   build_love
-  fetch "love-$LOVE_VERSION-win64.zip"
-  local work="$CACHE/win"
-  rm -rf "$work" && mkdir -p "$work"
-  unzip -q "$CACHE/love-$LOVE_VERSION-win64.zip" -d "$work"
-  local src="$work/love-$LOVE_VERSION-win64"
-  local out="$work/$APP"
-  mkdir -p "$out"
-  cat "$src/love.exe" "$DIST/$APP.love" >"$out/$APP.exe"
-  cp "$src"/*.dll "$out/"
-  cp "$src/license.txt" "$out/LOVE-license.txt"
-  cp "$ROOT/assets/icon.ico" "$ROOT/README.md" "$out/"
-  rm -f "$DIST/$APP-windows.zip"
-  (cd "$work" && zip -9 -qr "$DIST/$APP-windows.zip" "$APP")
-  echo "built dist/$APP-windows.zip"
+  fetch_runtime "$APP-runtime-win64.exe"
+  fetch_runtime LOVE-license.txt
+  local runtime="$CACHE/runtime-$RUNTIME_VERSION"
+  # A fused game is just the runtime with the .love archive appended.
+  cat "$runtime/$APP-runtime-win64.exe" "$DIST/$APP.love" >"$DIST/$APP.exe"
+  cp "$runtime/LOVE-license.txt" "$DIST/"
+  echo "built dist/$APP.exe"
 }
 
 build_macos() {

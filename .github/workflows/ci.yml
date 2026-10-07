@@ -21,7 +21,36 @@ jobs:
       - run: busted
       - run: luacheck .
 
+  # The Windows runtime (LÖVE as one statically linked exe, see scripts/runtime) lives in the release
+  # "runtime-<version>", where the build scripts download it from. The first push with a new
+  # scripts/runtime/version.txt builds and publishes it here; after that this job takes seconds.
+  runtime:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish the runtime if this version has no release yet
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content scripts/runtime/version.txt -TotalCount 1).Trim()
+          $tag = "runtime-$version"
+          function Test-Release { gh release view $tag --json tagName *> $null; $LASTEXITCODE -eq 0 }
+          if (Test-Release) { "Release $tag exists."; exit 0 }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\runtime\build-runtime.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $notes = "LÖVE built as one statically linked executable with KanbanEasy's icon. " +
+            "The build scripts append the game to it. This is not something to download and run: " +
+            "get KanbanEasy from the latest release instead."
+          gh release create $tag (Get-Item ".build-cache/$tag/*") --title "Windows runtime $version" `
+            --notes $notes --latest=false --target $env:GITHUB_SHA
+          # two pushes can race to publish the same version: the loser uses the winner's
+          if ($LASTEXITCODE -ne 0 -and -not (Test-Release)) { exit 1 }
+
   windows-build:
+    needs: runtime
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,14 +59,16 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 install
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $exe = Join-Path $env:LOCALAPPDATA 'Programs\KanbanEasy\KanbanEasy.exe'
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\KanbanEasy'
           $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'KanbanEasy.lnk'
-          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          if (-not (Test-Path dist\KanbanEasy.exe)) { throw 'missing dist\KanbanEasy.exe' }
           if (-not (Test-Path $lnk)) { throw "missing $lnk" }
-          if (-not (Test-Path dist\KanbanEasy-windows.zip)) { throw 'missing zip' }
+          # the app is one file: nothing but the exe gets installed
+          $installed = @(Get-ChildItem $dir | ForEach-Object Name)
+          if ("$installed" -ne 'KanbanEasy.exe') { throw "expected only KanbanEasy.exe in ${dir}, found: $installed" }
 
   package:
-    needs: test
+    needs: [test, runtime]
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
